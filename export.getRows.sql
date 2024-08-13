@@ -1,5 +1,10 @@
 
-create procedure [export].[sp_getData]
+alter procedure [export].[sp_getData]
+	@flags varchar(255)
+	,@parameters nvarchar(max)
+	,@columns nvarchar(max)
+	,@group_by_selection varchar(100)
+	,@id varchar(20)
 
 as
 
@@ -7,7 +12,305 @@ begin
 
 -- declare variables which will be passed later as procedure parameters
 
-declare @flags varchar(255) = '[
+declare @sql nvarchar(max)
+declare @role varchar(20)
+declare @rlsWhereClause varchar(1000)
+
+
+----- Get parameters and save each parameters value in separate temp table
+
+drop table if exists #parametersJson
+
+select @parameters as [parametrs] into #parametersJson
+
+
+drop table if exists #parameters
+
+select
+	 w.[name]
+	,w.[value]
+	,row_number() over(order by [name]) as [rowN]
+into #parameters
+from (
+	select 
+		o.[name]
+		,o.[value] as [value]
+	from #parametersJson f
+	cross apply openjson([parametrs])
+	with (
+		[name] varchar(2000)
+		,[value] nvarchar(max) as json
+	) o
+) w
+
+---- Reporting Period -----
+
+drop table if exists #reportingPeriodEndDate
+
+select 
+	[name]
+	,cast(ltrim(rtrim(replace(replace(replace(replace(s.[value], char(10), char(32)),char(13), char(32)),char(160), char(32)),char(9),char(32)))) as date) as [date]
+into #reportingPeriodEndDate
+from #parameters p
+cross apply string_split(trim('[""] ' from replace(p.[value],'"','')), ',') s
+where [name] = 'Reporting_Period_End_Date'
+
+
+declare @reportingPeriodWhereClause varchar(2000)
+
+if (select count(*) from #reportingPeriodEndDate) > 0
+	set @reportingPeriodWhereClause = ' and [Reporting_Period_End_Date] in (select [date] from #reportingPeriodEndDate)'
+else
+	set @reportingPeriodWhereClause = ''
+
+
+---- TPA -----
+
+drop table if exists #tpa
+
+select 
+	[name]
+	,ltrim(rtrim(replace(replace(replace(replace(s.[value], char(10), char(32)),char(13), char(32)),char(160), char(32)),char(9),char(32)))) as [TPA]
+into #tpa
+from #parameters p
+cross apply string_split(trim('[""] ' from replace(p.[value],'"','')), ',') s
+where [name] = 'TPA_Name'
+
+
+if (select count(*) from #tpa) > 0
+	set @role = 'TPA'
+if (select count(*) from #tpa) > 0
+	set @rlsWhereClause = 'select [TPA] from #tpa'
+	
+---- Underwriter -----
+
+drop table if exists #underwriter
+
+select 
+	[name]
+	,ltrim(rtrim(replace(replace(replace(replace(s.[value], char(10), char(32)),char(13), char(32)),char(160), char(32)),char(9),char(32)))) as [Underwriter]
+into #underwriter
+from #parameters p
+cross apply string_split(trim('[""] ' from replace(p.[value],'"','')), ',') s
+where [name] = 'Underwriter_Name'
+
+
+if (select count(*) from #underwriter) > 0
+	set @role = 'Underwriter'
+if (select count(*) from #underwriter) > 0
+	set @rlsWhereClause = 'select [Underwriter] from #underwriter'
+
+
+---- Coverholder ----
+
+drop table if exists #coverholder
+
+select 
+	[name]
+	,ltrim(rtrim(replace(replace(replace(replace(s.[value], char(10), char(32)),char(13), char(32)),char(160), char(32)),char(9),char(32)))) as [Coverholder]
+into #coverholder
+from #parameters p
+cross apply string_split(trim('[""] ' from replace(p.[value],'"','')), ',') s
+where [name] = 'Coverholder_Name'
+
+
+if (select count(*) from #coverholder) > 0
+	set @role = 'Coverholder'
+if (select count(*) from #coverholder) > 0
+	set @rlsWhereClause = 'select [Coverholder] from #coverholder'
+
+
+---- Flags ----
+
+drop table if exists #flagsJson
+
+select @flags as [flags] into #flagsJson
+
+drop table if exists #flags
+
+select
+	 w.[name]
+	,w.[value]
+	,row_number() over(order by [name]) as [rowN]
+into #flags
+from (
+	select 
+		o.[name]
+		,o.[value]
+	from #flagsJson f
+	cross apply openjson([flags])
+	with (
+		[name] varchar(50)
+		,[value] varchar(50)
+	) o
+) w
+
+
+declare @i tinyint = 1
+declare @rows tinyint = (select max([rowN]) from #flags)
+declare @flagsWhereClause varchar(255) = 'where ('
+declare @currentName varchar(25)
+declare @currentValue char(1)
+
+while @i <= @rows
+	begin
+		set @currentName = (select [name] from #flags where [rowN] = @i)
+		set @currentValue = (select [value] from #flags where [rowN] = @i)
+
+		set @flagsWhereClause = @flagsWhereClause + @currentName + ' = ' + @currentValue
+
+		if @i <> @rows
+			begin
+				set @flagsWhereClause = @flagsWhereClause + ' or '
+			end
+
+		set @i = @i + 1
+	end
+
+set @flagsWhereClause = @flagsWhereClause + ')'
+
+
+---- Columns -----
+
+set @columns = replace(replace(@columns, '",', '],'), '"', '[')
+set @columns = substring(@columns, 0, len(@columns)) + ']'
+
+-- INVALID COLUMNS:
+--Invalid column name 'Date_of_Loss_To'.
+--Invalid column name 'Reg_No_of_Vehicle_etc'.
+--Invalid column name 'Ceded_Reinsurance'.
+--Invalid column name 'Plan'.
+--Invalid column name 'Patient_Name'.
+--Invalid column name 'Treatment_Type'.
+--Invalid column name 'Country_of_Treatment'.
+--Invalid column name 'Date_of_Treatment'.
+--Invalid column name 'BDX_Key'.
+
+-- Duplicated: Date_Coverage_Confirmed 
+
+
+
+---- 1) find the matching Group to the value -----
+
+drop table if exists ##rlsIds
+
+set @sql = 'select * into ##rlsIds
+			from [dbo].[rls_filterset_rls_' + @role + ']
+			where [parent_id] in (
+				select [id] from [dbo].[rls_filterset_rls_' + @role + '] where ' + @role + ' in (' + @rlsWhereClause + ') and [parent_id] is null
+	)
+'
+exec(@sql)
+
+
+--select * from ##rlsIds
+
+---- 2) Get UMRs for specified group ----
+drop table if exists ##umr
+
+set @sql = 'select distinct d.[UMR]
+			into ##umr
+			from [dbo].[rls_filterset_umr_' + @role + '] d
+			join ##rlsIds r on r.[id] = d.[RLS_'+ @role + '_id]'
+
+exec(@sql)
+
+
+--select * from ##umr
+--select * from #activeUmr
+
+---- 3) Get active umrs ----
+drop table if exists #activeUmr
+
+select distinct
+	g.[umr_rc_cc_sn]
+into #activeUmr
+from [dbo].[rls_filterset_globalumr] g
+join ##umr u on u.[UMR] = g.[umr]
+where g.[bdx_status] = 1
+
+
+
+---- 4) Get list of underwriters and brokers for grouping ----
+
+drop table if exists #underwriters
+
+select distinct 
+	g.[umr]
+	,rls.[underwriter] as [Underwriter]
+into #underwriters
+from [dbo].[rls_filterset_globalumr] g
+join ##umr u on u.[UMR] = g.[umr]
+left join [dbo].[rls_filterset_umr_underwriter] rlsumr on rlsumr.[umr] = g.[umr]
+join [dbo].[rls_filterset_rls_underwriter] rls on rls.[id] = rlsumr.[RLS_Underwriter_id]
+
+drop table if exists #brokers
+
+select distinct 
+	g.[umr]
+	,rls.[broker] as [Broker]
+into #brokers
+from [dbo].[rls_filterset_globalumr] g
+join ##umr u on u.[UMR] = g.[umr]
+left join [dbo].[rls_filterset_umr_broker] rlsumr on rlsumr.[umr] = g.[umr]
+join [dbo].[rls_filterset_rls_broker] rls on rls.[id] = rlsumr.[RLS_Broker_id]
+
+
+--select * from #activeUmr
+
+---- 5) Get rows from datarows table (based on user's columns and flags selection) -----
+
+set @sql = 'drop table if exists [export].[getData_' + @id + ']'
+exec(@sql)
+
+set @sql = 'select u.[Underwriter], b.[Broker], d.[Unique_Market_Reference_UMR] + ''_'' + coalesce(nullif(d.[Risk_Code],''''), ''0'') + ''_'' + coalesce(nullif(d.[Lloyds_Cat_Code],''''), ''0'') + ''_'' + coalesce(nullif(d.[Section_No],''''), ''0'') as [umr_rc_cc_sn],' 
+			+ @columns + '
+			into [export].[getData_' + @id + ']
+			from [dbo].[rig_datarows] d
+			join #activeUmr a on a.[umr_rc_cc_sn] = d.[Unique_Market_Reference_UMR] + ''_'' + coalesce(nullif(d.[Risk_Code],''''), ''0'') + ''_'' + coalesce(nullif(d.[Lloyds_Cat_Code],''''), ''0'') + ''_'' + coalesce(nullif(d.[Section_No],''''), ''0'')
+			join [dbo].[rig_dataintegrityrules] dir on dir.[data_row_id] = d.[id]
+			left join #underwriters u on u.[umr] = d.[Unique_Market_Reference_UMR]
+			left join #brokers b on b.[umr] = d.[Unique_Market_Reference_UMR]'
+			+ @flagsWhereClause
+			+ @reportingPeriodWhereClause 
+			+ ' order by [umr_rc_cc_sn]'
+
+--print cast(substring(@sql, 1, 16000) as ntext )
+--print cast(substring(@sql, 16001, 32000) as ntext )
+
+exec(@sql)
+
+--select top 1000 * from ##tempResult
+
+---- 6) Grouping data ----
+
+set @sql = 'drop table if exists [export].[getData_' + @id + '_grouped]'
+exec(@sql)
+
+set @sql = 'select
+	[Reporting_Period_End_Date_Folder]
+	,[' + @group_by_selection + '_Folder]
+	,[umr_rc_cc_sn_File]
+	,[RowsNumber]
+	,''select * from [export].[getData_' + @id + '] where [Reporting_Period_End_Date] = '''''' + convert(varchar(10),[Reporting_Period_End_Date_Folder]) + '''''' and [' + @group_by_selection + '] = '''''' + [' + @group_by_selection + '_Folder] + '''''' and [umr_rc_cc_sn] = '''''' + [umr_rc_cc_sn_File] + '''''''' as [query]
+into [export].[getData_' + @id + '_grouped]
+from (
+	select distinct
+		[Reporting_Period_End_Date] as [Reporting_Period_End_Date_Folder]
+		,[' + @group_by_selection + '] as [' + @group_by_selection + '_Folder]
+		,[umr_rc_cc_sn] as [umr_rc_cc_sn_File]
+		,count(*) as [RowsNumber]
+	from [export].[getData_' + @id + ']
+	group by [Reporting_Period_End_Date],[' + @group_by_selection + '] ,[umr_rc_cc_sn]
+) w
+order by [Reporting_Period_End_Date_Folder],[' + @group_by_selection + '_Folder] ,[umr_rc_cc_sn_File]'
+
+exec(@sql)
+
+end
+
+exec [export].[sp_getData]
+	@flags = '[
       {
          "name":"Non_Critical_Flag",
          "value":0
@@ -17,53 +320,22 @@ declare @flags varchar(255) = '[
          "value":0
       }
    ]'
-
-declare @parameters nvarchar(max) = '[
+   ,@parameters  = '[
       {
-         "name":"TPA_Name",
+         "name":"Underwriter_Name",
          "value":[
-            "ACM",
-            "Adair Horne",
-            "Advent",
-            "Ambridge",
-            "Catalytic Claims Services",
-            "Crawford & Company (UK)",
-            "Crawford & Company (US)",
-            "Davies Property Claims LLC",
-            "DWF",
-            "Gulf Coast Claims Service",
-            "Hausch",
-            "Johns Eastern",
-            "Johnson & Johnson",
-            "Mills Mehr",
-            "Minuteman",
-            "Minuteman (Ignore)",
-            "NARS",
-            "Peninsula Insurance Bureau",
-            "Proctor",
-            "Riverstone",
-            "RRM",
-            "SCM IPG",
-            "Sedgwick",
-            "State Street",
-            "TestTPA",
-            "Trident",
-            "US IPG",
-            "Vanguard",
-            "Vanguard (Atrium)"
+            "Brit"
          ]
       },
       {
          "name":"Reporting_Period_End_Date",
          "value":[
-            "05-31-2023",
-            "06-30-2023",
-            "07-31-2023"
+            "2024-04-30",
+			"2024-03-31"
          ]
       }
    ]'
-
-declare @columns nvarchar(max) = '"Coverholder_Name",
+   ,@columns = '"Coverholder_Name",
       "TPA_Name",
       "Agreement",
       "Unique_Market_Reference_UMR",
@@ -174,7 +446,6 @@ declare @columns nvarchar(max) = '"Coverholder_Name",
       "Date_Claim_Denied",
       "Reason_for_Denial",
       "Date_claim_withdrawn",
-      "Date_Coverage_Confirmed",
       "Subrogation_Recovered_This_Month",
       "Subrogation_Previously_Recovered",
       "Total_Subrogation_Recovered",
@@ -204,203 +475,8 @@ declare @columns nvarchar(max) = '"Coverholder_Name",
       "Fault",
       "Distance",
       "Year_of_Account"'
-
-declare @sql nvarchar(max)
-declare @role varchar(20)
-
-
------ Get parameters and save each parameters value in separate temp table
-
-drop table if exists #parametersJson
-
-select @parameters as [parametrs] into #parametersJson
+	  ,@group_by_selection = 'Underwriter'
+	  ,@id = 'id1'
 
 
-drop table if exists #parameters
-
-select
-	 w.[name]
-	,w.[value]
-	,row_number() over(order by [name]) as [rowN]
-into #parameters
-from (
-	select 
-		o.[name]
-		,o.[value] as [value]
-	from #parametersJson f
-	cross apply openjson([parametrs])
-	with (
-		[name] varchar(2000)
-		,[value] nvarchar(max) as json
-	) o
-) w
-
-
-drop table if exists #reportingPeriodEndDate
-
-select 
-	[name]
-	,cast(ltrim(rtrim(replace(replace(replace(replace(s.[value], char(10), char(32)),char(13), char(32)),char(160), char(32)),char(9),char(32)))) as date) as [date]
-into #reportingPeriodEndDate
-from #parameters p
-cross apply string_split(trim('[""] ' from replace(p.[value],'"','')), ',') s
-where [name] = 'Reporting_Period_End_Date'
-
-
-declare @reportingPeriodWhereClause varchar(2000)
-
-if (select count(*) from #reportingPeriodEndDate) > 0
-	set @reportingPeriodWhereClause = ' and [Reporting_Period_End_Date] in (select [date] from #reportingPeriodEndDate)'
-else
-	set @reportingPeriodWhereClause = ''
-
-
-drop table if exists #tpa
-
-select 
-	[name]
-	,ltrim(rtrim(replace(replace(replace(replace(s.[value], char(10), char(32)),char(13), char(32)),char(160), char(32)),char(9),char(32)))) as [TPA]
-into #tpa
-from #parameters p
-cross apply string_split(trim('[""] ' from replace(p.[value],'"','')), ',') s
-where [name] = 'TPA_Name'
-
-
-declare @rlsWhereClause varchar(1000)
-if (select count(*) from #tpa) > 0
-	set @role = 'TPA'
-	set @rlsWhereClause = 'select [TPA] from #tpa'
-	
--- to be added: other roles than TPA
-
-
-
------ get flag parameter and prepare where clause
-
-drop table if exists #flagsJson
-
-select @flags as [flags] into #flagsJson
-
-drop table if exists #flags
-
-select
-	 w.[name]
-	,w.[value]
-	,row_number() over(order by [name]) as [rowN]
-into #flags
-from (
-	select 
-		o.[name]
-		,o.[value]
-	from #flagsJson f
-	cross apply openjson([flags])
-	with (
-		[name] varchar(50)
-		,[value] varchar(50)
-	) o
-) w
-
-
-declare @i tinyint = 1
-declare @rows tinyint = (select max([rowN]) from #flags)
-declare @flagsWhereClause varchar(255) = 'where ('
-declare @currentName varchar(25)
-declare @currentValue char(1)
-
-while @i <= @rows
-	begin
-		set @currentName = (select [name] from #flags where [rowN] = @i)
-		set @currentValue = (select [value] from #flags where [rowN] = @i)
-
-		set @flagsWhereClause = @flagsWhereClause + @currentName + ' = ' + @currentValue
-
-		if @i <> @rows
-			begin
-				set @flagsWhereClause = @flagsWhereClause + ' or '
-			end
-
-		set @i = @i + 1
-	end
-
-set @flagsWhereClause = @flagsWhereClause + ')'
-
-
------- prepare columns, so they can be used inside sql query
-
-set @columns = replace(replace(@columns, '",', '],'), '"', '[')
-set @columns = substring(@columns, 0, len(@columns)) + ']'
-
--- INVALID COLUMNS:
---Invalid column name 'Date_of_Loss_To'.
---Invalid column name 'Reg_No_of_Vehicle_etc'.
---Invalid column name 'Ceded_Reinsurance'.
---Invalid column name 'Plan'.
---Invalid column name 'Patient_Name'.
---Invalid column name 'Treatment_Type'.
---Invalid column name 'Country_of_Treatment'.
---Invalid column name 'Date_of_Treatment'.
---Invalid column name 'BDX_Key'.
-
-
-
-
-
--- 1) find the matching Group to the value
-
-drop table if exists ##rlsIds
-
-set @sql = 'select * into ##rlsIds
-			from [dbo].[rls_filterset_rls_' + @role + ']
-			where [parent_id] in (
-				select [id] from [dbo].[rls_filterset_rls_' + @role + '] where ' + @role + ' in (' + @rlsWhereClause + ') and [parent_id] is null
-	)
-'
-exec(@sql)
-
---select * from ##rlsIds
-
--- 2) Get UMRs for specified group
-drop table if exists ##umr
-
-set @sql = 'select distinct d.[UMR]
-			into ##umr
-			from [dbo].[rls_filterset_umr_' + @role + '] d
-			join ##rlsIds r on r.[id] = d.[RLS_'+ @role + '_id]'
-
-exec(@sql)
-
-
---select * from ##umr
-
-
--- 3) Get active umrs
-drop table if exists #activeUmr
-
-select distinct
-	g.[umr]
-	--,g.[umr_rc_cc_sn]
-into #activeUmr
-from [dbo].[rls_filterset_globalumr] g
-join ##umr u on u.[UMR] = g.[umr]
-where g.[bdx_status] = 1
-
---select * from #activeUmr
-
--- 4) Get rows from datarows table (based on user's columns and flags selection)
-
-set @sql = 'select d.' + @columns + '
-			from [dbo].[rig_datarows] d
-			join #activeUmr a on a.[umr] = d.[Unique_Market_Reference_UMR]
-			join [dbo].[rig_dataintegrityrules] dir on dir.[data_row_id] = d.[id] '
-			+ @flagsWhereClause
-			+ @reportingPeriodWhereClause
-
---print cast(substring(@sql, 1, 16000) as ntext )
---print cast(substring(@sql, 16001, 32000) as ntext )
-
-exec(@sql)
-
-end
-GO
-
-
+	select * from  [export].[getData_id1_grouped] order by 1,2,3
