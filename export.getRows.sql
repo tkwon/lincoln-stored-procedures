@@ -284,6 +284,21 @@ exec(@sql)
 
 ---- 6) Grouping data ----
 
+drop table if exists ##coverholderGroup
+
+set @sql = 'select distinct
+	e.[Coverholder_Name]
+	,case 
+		when c.[parent_id] is null then coalesce(c.[coverholder],''Missing'')
+		else coalesce(cc.[coverholder],''Missing'')
+	end as [Coverholder_final]
+into ##coverholderGroup
+from [export].[getData_' + @id + '] e
+left join [dbo].[rls_filterset_rls_coverholder] c on c.[coverholder] = e.[Coverholder_Name]
+left join [dbo].[rls_filterset_rls_coverholder] cc on cc.[id] = c.[parent_id]'
+
+exec(@sql)
+
 set @sql = 'drop table if exists [export].[getData_' + @id + '_grouped]'
 exec(@sql)
 
@@ -298,12 +313,15 @@ from (
 	select distinct
 		[Reporting_Period_End_Date] as [Reporting_Period_End_Date_Folder]
 		,[' + @group_by_selection + '] as [' + @group_by_selection + '_Folder]
-		,[umr_rc_cc_sn] as [umr_rc_cc_sn_File]
+		,cg.[Coverholder_final] + ''-'' + replace([umr_rc_cc_sn],''_'',''-'') + ''-'' + ''(RptDate-'' + convert(varchar(10), [Reporting_Period_End_Date], 32) + '')'' as [umr_rc_cc_sn_File]
 		,count(*) as [RowsNumber]
-	from [export].[getData_' + @id + ']
-	group by [Reporting_Period_End_Date],[' + @group_by_selection + '] ,[umr_rc_cc_sn]
+	from [export].[getData_' + @id + '] e
+	left join ##coverholderGroup cg on cg.[Coverholder_Name] = e.[Coverholder_Name]
+	group by [Reporting_Period_End_Date],[' + @group_by_selection + '] ,[umr_rc_cc_sn],cg.[Coverholder_final]
 ) w
 order by [Reporting_Period_End_Date_Folder],[' + @group_by_selection + '_Folder] ,[umr_rc_cc_sn_File]'
+
+
 
 exec(@sql)
 
@@ -478,5 +496,3 @@ exec [export].[sp_getData]
 	  ,@group_by_selection = 'Underwriter'
 	  ,@id = 'id1'
 
-
-	select * from  [export].[getData_id1_grouped] order by 1,2,3
