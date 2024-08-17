@@ -307,7 +307,7 @@ set @sql = 'select
 	,[' + @group_by_selection + '_Folder]
 	,[umr_rc_cc_sn_File]
 	,[RowsNumber]
-	,''select * from [export].[getData_' + @id + '] where [Reporting_Period_End_Date] = '''''' + convert(varchar(10),[Reporting_Period_End_Date_Folder]) + '''''' and [' + @group_by_selection + '] = '''''' + [' + @group_by_selection + '_Folder] + '''''' and [umr_rc_cc_sn] = '''''' + [umr_rc_cc_sn_File] + '''''''' as [query]
+	,''select * from [export].[getData_' + @id + '] where [Reporting_Period_End_Date] = '''''' + convert(varchar(10),[Reporting_Period_End_Date]) + '''''' and [' + @group_by_selection + '] = '''''' + [' + @group_by_selection + '_Folder] + '''''' and [umr_rc_cc_sn] = '''''' + [umr_rc_cc_sn] + '''''''' as [query]
 into [export].[getData_' + @id + '_grouped]
 from (
 	select distinct
@@ -315,6 +315,8 @@ from (
 		,[' + @group_by_selection + '] as [' + @group_by_selection + '_Folder]
 		,cg.[Coverholder_final] + ''-'' + replace([umr_rc_cc_sn],''_'',''-'') + ''-'' + ''(RptDate-'' + convert(varchar(10), [Reporting_Period_End_Date], 32) + '')'' as [umr_rc_cc_sn_File]
 		,count(*) as [RowsNumber]
+		,[umr_rc_cc_sn]
+		,[Reporting_Period_End_Date]
 	from [export].[getData_' + @id + '] e
 	left join ##coverholderGroup cg on cg.[Coverholder_Name] = e.[Coverholder_Name]
 	group by [Reporting_Period_End_Date],[' + @group_by_selection + '] ,[umr_rc_cc_sn],cg.[Coverholder_final]
