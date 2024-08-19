@@ -1,5 +1,4 @@
-
-alter procedure [export].[sp_getData]
+create procedure [export].[sp_getData]
 	@flags varchar(255)
 	,@parameters nvarchar(max)
 	,@columns nvarchar(max)
@@ -119,6 +118,26 @@ if (select count(*) from #coverholder) > 0
 if (select count(*) from #coverholder) > 0
 	set @rlsWhereClause = 'select [Coverholder] from #coverholder'
 
+---- UMR -----
+
+drop table if exists #umr
+
+select 
+	[name]
+	,ltrim(rtrim(replace(replace(replace(replace(s.[value], char(10), char(32)),char(13), char(32)),char(160), char(32)),char(9),char(32)))) as [umr]
+into #umr
+from #parameters p
+cross apply string_split(trim('[""] ' from replace(p.[value],'"','')), ',') s
+where [name] = 'Unique_Market_Reference_UMR'
+
+
+declare @umrWhereClause varchar(100)
+
+if (select count(*) from #umr) > 0
+	set @umrWhereClause = ' where [UMR] in (select [umr] from #umr)'
+else
+	set @umrWhereClause = ''
+
 
 ---- Flags ----
 
@@ -211,7 +230,8 @@ drop table if exists ##umr
 set @sql = 'select distinct d.[UMR]
 			into ##umr
 			from [dbo].[rls_filterset_umr_' + @role + '] d
-			join ##rlsIds r on r.[id] = d.[RLS_'+ @role + '_id]'
+			join ##rlsIds r on r.[id] = d.[RLS_'+ @role + '_id] '
+			+ @umrWhereClause
 
 exec(@sql)
 
@@ -307,7 +327,7 @@ set @sql = 'select
 	,[' + @group_by_selection + '_Folder]
 	,[umr_rc_cc_sn_File]
 	,[RowsNumber]
-	,''select * from [export].[getData_' + @id + '] where [Reporting_Period_End_Date] = '''''' + convert(varchar(10),[Reporting_Period_End_Date_Folder]) + '''''' and [' + @group_by_selection + '] = '''''' + [' + @group_by_selection + '_Folder] + '''''' and [umr_rc_cc_sn] = '''''' + [umr_rc_cc_sn_File] + '''''''' as [query]
+	,''select * from [export].[getData_' + @id + '] where [Reporting_Period_End_Date] = '''''' + convert(varchar(10),[Reporting_Period_End_Date]) + '''''' and [' + @group_by_selection + '] = '''''' + [' + @group_by_selection + '_Folder] + '''''' and [umr_rc_cc_sn] = '''''' + [umr_rc_cc_sn] + '''''''' as [query]
 into [export].[getData_' + @id + '_grouped]
 from (
 	select distinct
@@ -315,6 +335,8 @@ from (
 		,[' + @group_by_selection + '] as [' + @group_by_selection + '_Folder]
 		,cg.[Coverholder_final] + ''-'' + replace([umr_rc_cc_sn],''_'',''-'') + ''-'' + ''(RptDate-'' + convert(varchar(10), [Reporting_Period_End_Date], 32) + '')'' as [umr_rc_cc_sn_File]
 		,count(*) as [RowsNumber]
+		,[umr_rc_cc_sn]
+		,[Reporting_Period_End_Date]
 	from [export].[getData_' + @id + '] e
 	left join ##coverholderGroup cg on cg.[Coverholder_Name] = e.[Coverholder_Name]
 	group by [Reporting_Period_End_Date],[' + @group_by_selection + '] ,[umr_rc_cc_sn],cg.[Coverholder_final]
@@ -326,173 +348,6 @@ order by [Reporting_Period_End_Date_Folder],[' + @group_by_selection + '_Folder]
 exec(@sql)
 
 end
+GO
 
-exec [export].[sp_getData]
-	@flags = '[
-      {
-         "name":"Non_Critical_Flag",
-         "value":0
-      },
-      {
-         "name":"Critical_Error_Flag",
-         "value":0
-      }
-   ]'
-   ,@parameters  = '[
-      {
-         "name":"Underwriter_Name",
-         "value":[
-            "Brit"
-         ]
-      },
-      {
-         "name":"Reporting_Period_End_Date",
-         "value":[
-            "2024-04-30",
-			"2024-03-31"
-         ]
-      }
-   ]'
-   ,@columns = '"Coverholder_Name",
-      "TPA_Name",
-      "Agreement",
-      "Unique_Market_Reference_UMR",
-      "Binder_Contract_Inception",
-      "Binder_Contract_Expiry",
-      "Reporting_Period_End_Date",
-      "Class_of_Business",
-      "Risk_Code",
-      "Section_No",
-      "Original_Currency",
-      "Settlement_Currency",
-      "Rate_of_Exchange",
-      "Certificate_Reference",
-      "Claim_Reference",
-      "Insured_Full_Name",
-      "Insured_State",
-      "Insured_Country",
-      "Location_of_Risk_State",
-      "Location_of_Risk_County",
-      "Risk_Inception_Date",
-      "Risk_Expiry_Date",
-      "Period_of_Cover",
-      "Loss_State",
-      "Location_of_Loss_Country",
-      "Cause_of_Loss",
-      "Loss_Description",
-      "Date_of_Loss_From",
-      "Date_Claim_Made",
-      "Claim_Status",
-      "Refer_to_Underwriters",
-      "Denial",
-      "Litigation_status",
-      "Claimant_Name",
-      "Loss_County",
-      "State_of_Filing",
-      "PCS_Code",
-      "Medicare_United_States_Bodily_Injury",
-      "Medicare_Eligibility_Check_Performed",
-      "Medicare_Outcome_of_Eligibility_Status_Check",
-      "Medicare_Conditional_Payments",
-      "Medicare_MSP_Compliance_Services",
-      "Paid_This_Month_Indemnity",
-      "Paid_This_Month_Fees",
-      "Previously_Paid_Indemnity",
-      "Previously_Paid_Fees",
-      "Reserve_Indemnity",
-      "Reserve_Fees",
-      "Change_This_Month_Indemnity",
-      "Change_This_Month_Fees",
-      "Total_Incurred_Indemnity",
-      "Total_Incurred_Fees",
-      "Coverholder_PIN",
-      "Reporting_Period_Start_Date",
-      "Type_of_Insurance",
-      "Policy_or_Group_Ref",
-      "Insured_Address",
-      "Insured_Postcode_Zip_Code_or_similar",
-      "Location_of_Risk_Location_ID",
-      "Location_of_Risk_Address",
-      "Location_of_Risk_Postcode_Zip_Code_or_similar",
-      "Deductible_Amount",
-      "Deductible_Basis",
-      "Sums_Insured_Amount",
-      "Location_of_Loss_Address",
-      "Location_of_Loss_Postcode_Zip_Code_or_similar",
-      "Date_Closed",
-      "Lloyds_Cat_Code",
-      "Catastrophe_Name",
-      "Paid_this_month_Expenses",
-      "Paid_this_month_Attorney_Coverage_Fees",
-      "Paid_this_month_Adjusters_Fees",
-      "Paid_this_month_Defence_Fees",
-      "Paid_this_month_TPA_Fees",
-      "Paid_this_month_Bank_Charges",
-      "Previously_Paid_Expenses",
-      "Previously_Paid_Attorney_Coverage_Fees",
-      "Previously_Paid_Adjusters_Fees",
-      "Previously_Paid_Defence_Fees",
-      "Previously_Paid_TPA_Fees",
-      "Previously_Paid_Bank_Charges",
-      "Reserve_Expenses",
-      "Reserve_Attorney_Coverage_Fees",
-      "Reserve_Adjusters_Fees",
-      "Reserve_Defence_Fees",
-      "Reserve_TPA_Fees",
-      "Reclosed_Date",
-      "Net_Recovery",
-      "Total_Incurred",
-      "Expert_Role",
-      "Expert_Firm",
-      "Expert_Reference_No",
-      "Expert_Address",
-      "Expert_State",
-      "Expert_Postcode_Zip_Code_or_similar",
-      "Expert_Country",
-      "Notes",
-      "Date_Claim_Opened",
-      "Ex_gratia_payment",
-      "Claim_First_Notification_Acknowledgement_Date",
-      "Date_First_Reserve_Established",
-      "Date_Coverage_Confirmed",
-      "Diary_date",
-      "Peer_review_date",
-      "Date_Claim_Amount_Agreed",
-      "Date_Claims_Paid",
-      "Date_of_Subrogation",
-      "Date_Reopened",
-      "Date_Claim_Denied",
-      "Reason_for_Denial",
-      "Date_claim_withdrawn",
-      "Subrogation_Recovered_This_Month",
-      "Subrogation_Previously_Recovered",
-      "Total_Subrogation_Recovered",
-      "Salvage_Recovered_This_Month",
-      "Salvage_Previously_Recovered",
-      "Total_Salvage_Recovered",
-      "Deductible_Recovered_This_Month",
-      "Deductible_Previously_Recovered",
-      "Total_Deductible_Recovered",
-      "Gross_Recovery_Received_This_Month",
-      "Gross_Recovery_Previously_Received",
-      "Gross_Recovery_Total",
-      "Recovery_Fees_Paid_This_Month",
-      "Recovery_Fees_Paid_Previously_Paid",
-      "Recovery_Fees_Total",
-      "Driver_Age",
-      "Cargo_Hauled",
-      "Reefer_Claim",
-      "Reefer_Age",
-      "Cargo_Total_Insured_Value",
-      "Vehicle_Unit_Age",
-      "Vehicles_Total_Insured_Value",
-      "Towing_Storage_Fees",
-      "Trailer_Interchange",
-      "Non_Owned_Trailer",
-      "MTC_Peril",
-      "Fault",
-      "Distance",
-      "Year_of_Account"'
-	  ,@group_by_selection = 'Underwriter'
-	  ,@id = 'id1'
 
