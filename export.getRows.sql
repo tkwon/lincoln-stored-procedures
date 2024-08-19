@@ -4,6 +4,7 @@ create procedure [export].[sp_getData]
 	,@columns nvarchar(max)
 	,@group_by_selection varchar(100)
 	,@id varchar(20)
+	,@group_by varchar(255)
 
 as
 
@@ -19,7 +20,6 @@ declare @rlsWhereClause varchar(1000)
 drop table if exists #parametersJson
 
 select @parameters as [parametrs] into #parametersJson
-
 
 drop table if exists #parameters
 
@@ -116,6 +116,7 @@ if (select count(*) from #coverholder) > 0
 if (select count(*) from #coverholder) > 0
 	set @rlsWhereClause = 'select [Coverholder] from #coverholder'
 
+
 ---- UMR -----
 
 drop table if exists #umr
@@ -129,7 +130,7 @@ cross apply string_split(trim('[""] ' from replace(p.[value],'"','')), ',') s
 where [name] = 'Unique_Market_Reference_UMR'
 
 
-declare @umrWhereClause varchar(100)
+declare @umrWhereClause nvarchar(max)
 
 if (select count(*) from #umr) > 0
 	set @umrWhereClause = ' where [UMR] in (select [umr] from #umr)'
@@ -137,7 +138,21 @@ else
 	set @umrWhereClause = ''
 
 
----- Flags ----
+---- Flags and Group_by ----
+
+declare @group_by_columns varchar(255)
+select @group_by_columns = string_agg(value, ', ')
+from openjson(@group_by)
+
+declare @umr_flags_join varchar(255)
+
+select @umr_flags_join = string_agg(
+    'uf.' + value + ' = d.' + value, 
+    ' and '
+)
+from openjson(@group_by)
+
+
 
 drop table if exists #flagsJson
 
@@ -165,20 +180,20 @@ from (
 
 declare @i tinyint = 1
 declare @rows tinyint = (select max([rowN]) from #flags)
-declare @flagsWhereClause varchar(255) = 'where ('
+declare @flagsWhereClause varchar(255) = '('
 declare @currentName varchar(25)
-declare @currentValue char(1)
+--declare @currentValue char(1)
 
 while @i <= @rows
 	begin
-		set @currentName = (select [name] from #flags where [rowN] = @i)
-		set @currentValue = (select [value] from #flags where [rowN] = @i)
+		set @currentName = (select [name] from #flags where [rowN] = @i and [value] = 1)
+		--set @currentValue = (select [value] from #flags where [rowN] = @i)
 
-		set @flagsWhereClause = @flagsWhereClause + @currentName + ' = ' + @currentValue
+		set @flagsWhereClause = @flagsWhereClause + '''' + @currentName + ''''
 
 		if @i <> @rows
 			begin
-				set @flagsWhereClause = @flagsWhereClause + ' or '
+				set @flagsWhereClause = @flagsWhereClause + ','
 			end
 
 		set @i = @i + 1
@@ -186,11 +201,12 @@ while @i <= @rows
 
 set @flagsWhereClause = @flagsWhereClause + ')'
 
+print(@flagsWhereClause)
 
 ---- Columns -----
 
-set @columns = replace(replace(@columns, '",', '],'), '"', '[')
-set @columns = substring(@columns, 0, len(@columns)) + ']'
+set @columns = replace(replace(@columns, '",', '],'), '"', 'd.[')
+set @columns = substring(@columns, 0, len(@columns)-2) + ']'
 
 -- INVALID COLUMNS:
 --Invalid column name 'Date_of_Loss_To'.
@@ -218,7 +234,6 @@ set @sql = 'select * into ##rlsIds
 	)
 '
 exec(@sql)
-
 
 --select * from ##rlsIds
 
@@ -274,6 +289,41 @@ left join [dbo].[rls_filterset_umr_broker] rlsumr on rlsumr.[umr] = g.[umr]
 join [dbo].[rls_filterset_rls_broker] rls on rls.[id] = rlsumr.[RLS_Broker_id]
 
 
+---- Assigning flags to UMRs -----
+
+drop table if exists ##temp
+set @sql = 'select ' + @group_by_columns + ' 
+				,[Critical_Error_Flag]
+				,[Non_Critical_Flag]
+				,row_number() over(partition by ' + @group_by_columns + ' order by ' + @group_by_columns + ', [Critical_Error_Flag] desc) as [rowN]
+			into ##temp
+			from (	
+				select distinct ' + @group_by_columns + '
+						,dir.[Critical_Error_Flag]
+						,dir.[Non_Critical_Flag]
+				from [dbo].[rig_datarows] d
+				join #activeUmr a on a.[umr_rc_cc_sn] = d.[Unique_Market_Reference_UMR] + ''_'' + coalesce(nullif(d.[Risk_Code],''''), ''0'') + ''_'' + coalesce(nullif(d.[Lloyds_Cat_Code],''''), ''0'') + ''_'' + coalesce(nullif(d.[Section_No],''''), ''0'')
+				join [dbo].[rig_dataintegrityrules] dir on dir.[data_row_id] = d.[id] '
+				+ @reportingPeriodWhereClause +
+				' ) w'
+
+exec(@sql)
+
+drop table if exists #umr_flags
+
+select *
+	,case
+		when [Critical_Error_Flag] = 1 then 'Critical_Error_Flag'
+		when [Critical_Error_Flag] = 0 and [Non_Critical_Flag] = 1 then 'Non_Critical_Flag'
+		else 'No Flag'
+	 end as [Flag]
+into #umr_flags
+from ##temp
+where [rowN] = 1
+
+
+
+--select * from #umr_flags
 --select * from #activeUmr
 
 ---- 5) Get rows from datarows table (based on user's columns and flags selection) -----
@@ -286,9 +336,10 @@ set @sql = 'select u.[Underwriter], b.[Broker], d.[Unique_Market_Reference_UMR] 
 			into [export].[getData_' + @id + ']
 			from [dbo].[rig_datarows] d
 			join #activeUmr a on a.[umr_rc_cc_sn] = d.[Unique_Market_Reference_UMR] + ''_'' + coalesce(nullif(d.[Risk_Code],''''), ''0'') + ''_'' + coalesce(nullif(d.[Lloyds_Cat_Code],''''), ''0'') + ''_'' + coalesce(nullif(d.[Section_No],''''), ''0'')
-			join [dbo].[rig_dataintegrityrules] dir on dir.[data_row_id] = d.[id]
+			join #umr_flags uf on ' + @umr_flags_join + '
 			left join #underwriters u on u.[umr] = d.[Unique_Market_Reference_UMR]
-			left join #brokers b on b.[umr] = d.[Unique_Market_Reference_UMR]'
+			left join #brokers b on b.[umr] = d.[Unique_Market_Reference_UMR]
+			where uf.[Flag] in '
 			+ @flagsWhereClause
 			+ @reportingPeriodWhereClause 
 			+ ' order by [umr_rc_cc_sn]'
