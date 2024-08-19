@@ -298,6 +298,14 @@ set @sql = 'select u.[Underwriter], b.[Broker], d.[Unique_Market_Reference_UMR] 
 
 exec(@sql)
 
+---- create index on new table ----
+
+declare @createindexsql varchar(255)
+
+set @createindexsql = 'create nonclustered index ix_nc_exportGetData_' + @id + ' on [export].[getData_' + @id + '] ([Reporting_Period_End_Date], [umr_rc_cc_sn], [' + @group_by_selection + '])'
+
+exec(@createindexsql)
+
 --select top 1000 * from ##tempResult
 
 ---- 6) Grouping data ----
