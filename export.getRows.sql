@@ -9,8 +9,6 @@ as
 
 begin
 
--- declare variables which will be passed later as procedure parameters
-
 declare @sql nvarchar(max)
 declare @role varchar(20)
 declare @rlsWhereClause varchar(1000)
