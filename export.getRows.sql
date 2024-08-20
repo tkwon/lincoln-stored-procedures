@@ -405,6 +405,5 @@ order by [Reporting_Period_End_Date_Folder],[' + @group_by_selection + '_Folder]
 exec(@sql)
 
 end
-GO
 
 
