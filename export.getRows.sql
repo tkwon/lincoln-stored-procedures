@@ -1,17 +1,4 @@
--- check if export schema exists, if not create it
-
-if not exists (select * from sys.schemas where name = 'export')
-	exec('create schema [export] authorization [dbo]')
-go
-
-
--- check if procedure already exists, if yes drop it
-drop procedure if exists [export].[sp_getData]
-go
-
-
--- create procedure statement
-create procedure [export].[sp_getData]
+create or alter procedure [export].[sp_getData]
 	@flags varchar(255)
 	,@parameters nvarchar(max)
 	,@columns nvarchar(max)
