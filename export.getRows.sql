@@ -208,6 +208,8 @@ print(@flagsWhereClause)
 set @columns = replace(replace(@columns, '",', '],'), '"', 'd.[')
 set @columns = substring(@columns, 0, len(@columns)-2) + ']'
 
+declare @columns_index nvarchar(max) = replace(replace(@columns, 'd.', ''),'[Reporting_Period_End_Date],','')
+
 -- INVALID COLUMNS:
 --Invalid column name 'Date_of_Loss_To'.
 --Invalid column name 'Reg_No_of_Vehicle_etc'.
@@ -351,9 +353,9 @@ exec(@sql)
 
 ---- create index on new table ----
 
-declare @createindexsql varchar(255)
+declare @createindexsql nvarchar(max)
 
-set @createindexsql = 'create nonclustered index ix_nc_exportGetData_' + @id + ' on [export].[getData_' + @id + '] ([Reporting_Period_End_Date], [umr_rc_cc_sn], [' + @group_by_selection + '])'
+set @createindexsql = 'create nonclustered index ix_nc_exportGetData_' + @id + ' on [export].[getData_' + @id + '] ([Reporting_Period_End_Date], [umr_rc_cc_sn], [' + @group_by_selection + ']) include (' + @columns_index + ')'
 
 exec(@createindexsql)
 
@@ -384,7 +386,7 @@ set @sql = 'select
 	,[' + @group_by_selection + '_Folder]
 	,[umr_rc_cc_sn_File]
 	,[RowsNumber]
-	,''select * from [export].[getData_' + @id + '] where [Reporting_Period_End_Date] = '''''' + convert(varchar(10),[Reporting_Period_End_Date]) + '''''' and [' + @group_by_selection + '] = '''''' + [' + @group_by_selection + '_Folder] + '''''' and [umr_rc_cc_sn] = '''''' + [umr_rc_cc_sn] + '''''''' as [query]
+	,''select ' + @columns + ' from [export].[getData_' + @id + '] d where [Reporting_Period_End_Date] = '''''' + convert(varchar(10),[Reporting_Period_End_Date]) + '''''' and [' + @group_by_selection + '] = '''''' + [' + @group_by_selection + '_Folder] + '''''' and [umr_rc_cc_sn] = '''''' + [umr_rc_cc_sn] + '''''''' as [query]
 into [export].[getData_' + @id + '_grouped]
 from (
 	select distinct
@@ -399,8 +401,6 @@ from (
 	group by [Reporting_Period_End_Date],[' + @group_by_selection + '] ,[umr_rc_cc_sn],cg.[Coverholder_final]
 ) w
 order by [Reporting_Period_End_Date_Folder],[' + @group_by_selection + '_Folder] ,[umr_rc_cc_sn_File]'
-
-
 
 exec(@sql)
 
