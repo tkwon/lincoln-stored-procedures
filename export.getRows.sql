@@ -261,8 +261,8 @@ drop table if exists ##umr
 
 create table ##umr (
 	[UMR] varchar(255) null
-	,[Risk_Code] varchar(20) null
-	,[Section_No] varchar(20) null
+	,[Risk_Code] varchar(255) null
+	,[Section_No] varchar(255) null
 )
 
 set @sql = 'insert ##umr ([UMR],[Risk_Code],[Section_No])
