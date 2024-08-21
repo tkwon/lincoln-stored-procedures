@@ -242,6 +242,18 @@ set @sql = 'select * into ##rlsIds
 '
 exec(@sql)
 
+declare @tpaWhereClause varchar(255)
+
+if @role = 'TPA'
+	set @tpaWhereClause = ' and [TPA_Name] in (select [TPA] from ##rlsIds)'
+else set @tpaWhereClause = ''
+
+declare @coverholderWhereClause varchar(255)
+
+if @role = 'Coverholder'
+	set @coverholderWhereClause = ' and [Coverholder_Name] in (select [Coverholder] from ##rlsIds)'
+else set @coverholderWhereClause = ''
+
 --select * from ##rlsIds
 
 ---- 2) Get UMRs for specified group ----
@@ -249,10 +261,12 @@ drop table if exists ##umr
 
 create table ##umr (
 	[UMR] varchar(255) null
+	,[Risk_Code] varchar(20) null
+	,[Section_No] varchar(20) null
 )
 
-set @sql = 'insert ##umr ([UMR])
-			select distinct d.[UMR]
+set @sql = 'insert ##umr ([UMR],[Risk_Code],[Section_No])
+			select distinct d.[UMR], coalesce(nullif(d.[Risk_Code],''''), ''0'') as [Risk_Code], coalesce(nullif(d.[Section_No],''''), ''0'') as [Section_No]
 			from [dbo].[rls_filterset_umr_' + @role + '] d
 			join ##rlsIds r on r.[id] = d.[RLS_'+ @role + '_id] '
 			+ @umrWhereClause
@@ -270,7 +284,7 @@ select distinct
 	g.[umr_rc_cc_sn]
 into #activeUmr
 from [dbo].[rls_filterset_globalumr] g
-join ##umr u on u.[UMR] = g.[umr]
+join ##umr u on u.[UMR] = g.[umr] and u.[Risk_Code] = coalesce(nullif(g.[Risk_Code],''), '0') and u.[Section_No] = coalesce(nullif(g.[Section_No],''), '0')
 where g.[bdx_status] = 1
 
 
@@ -284,7 +298,7 @@ select distinct
 	,rls.[underwriter] as [Underwriter]
 into #underwriters
 from [dbo].[rls_filterset_globalumr] g
-join ##umr u on u.[UMR] = g.[umr]
+join ##umr u on u.[UMR] = g.[umr] and u.[Risk_Code] = coalesce(nullif(g.[Risk_Code],''), '0') and u.[Section_No] = coalesce(nullif(g.[Section_No],''), '0')
 left join [dbo].[rls_filterset_umr_underwriter] rlsumr on rlsumr.[umr] = g.[umr]
 join [dbo].[rls_filterset_rls_underwriter] rls on rls.[id] = rlsumr.[RLS_Underwriter_id]
 
@@ -352,6 +366,8 @@ set @sql = 'select u.[Underwriter], b.[Broker], d.[Unique_Market_Reference_UMR] 
 			left join #brokers b on b.[umr] = d.[Unique_Market_Reference_UMR]'
 			+ @flagsWhereClause
 			+ @reportingPeriodWhereClause 
+			+ @tpaWhereClause
+			+ @coverholderWhereClause
 			+ ' order by [umr_rc_cc_sn]'
 
 --print cast(substring(@sql, 1, 16000) as ntext )
