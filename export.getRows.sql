@@ -143,16 +143,18 @@ else
 ---- Flags and Group_by ----
 
 declare @group_by_columns varchar(255)
-select @group_by_columns = string_agg(value, ', ')
-from openjson(@group_by)
+select @group_by_columns = string_agg(value, ', ') from openjson(@group_by)
 
 declare @umr_flags_join varchar(255)
 
-select @umr_flags_join = string_agg(
+select @umr_flags_join = 'join #umr_flags uf on ' + string_agg(
     'uf.' + value + ' = d.' + value, 
     ' and '
-)
-from openjson(@group_by)
+	)
+	from openjson(@group_by)
+
+if @flags = '[]'
+	set @umr_flags_join = ''
 
 
 
@@ -182,7 +184,7 @@ from (
 
 declare @i tinyint = 1
 declare @rows tinyint = (select max([rowN]) from #flags)
-declare @flagsWhereClause varchar(255) = '('
+declare @flagsWhereClause varchar(255) = 'where uf.[Flag] in ('
 declare @currentName varchar(25)
 --declare @currentValue char(1)
 
@@ -203,7 +205,8 @@ while @i <= @rows
 
 set @flagsWhereClause = @flagsWhereClause + ')'
 
-print(@flagsWhereClause)
+if @flags = '[]'
+	set @flagsWhereClause = ' where 1=1'
 
 ---- Columns -----
 
@@ -245,7 +248,7 @@ exec(@sql)
 drop table if exists ##umr
 
 create table ##umr (
-	[UMR] varchar(20) null
+	[UMR] varchar(255) null
 )
 
 set @sql = 'insert ##umr ([UMR])
@@ -343,11 +346,10 @@ set @sql = 'select u.[Underwriter], b.[Broker], d.[Unique_Market_Reference_UMR] 
 			+ @columns + '
 			into [export].[getData_' + @id + ']
 			from [dbo].[rig_datarows] d
-			join #activeUmr a on a.[umr_rc_cc_sn] = d.[Unique_Market_Reference_UMR] + ''_'' + coalesce(nullif(d.[Risk_Code],''''), ''0'') + ''_'' + coalesce(nullif(d.[Lloyds_Cat_Code],''''), ''0'') + ''_'' + coalesce(nullif(d.[Section_No],''''), ''0'')
-			join #umr_flags uf on ' + @umr_flags_join + '
+			join #activeUmr a on a.[umr_rc_cc_sn] = d.[Unique_Market_Reference_UMR] + ''_'' + coalesce(nullif(d.[Risk_Code],''''), ''0'') + ''_'' + coalesce(nullif(d.[Lloyds_Cat_Code],''''), ''0'') + ''_'' + coalesce(nullif(d.[Section_No],''''), ''0'')'
+			+ @umr_flags_join + '
 			left join #underwriters u on u.[umr] = d.[Unique_Market_Reference_UMR]
-			left join #brokers b on b.[umr] = d.[Unique_Market_Reference_UMR]
-			where uf.[Flag] in '
+			left join #brokers b on b.[umr] = d.[Unique_Market_Reference_UMR]'
 			+ @flagsWhereClause
 			+ @reportingPeriodWhereClause 
 			+ ' order by [umr_rc_cc_sn]'
