@@ -14,6 +14,8 @@ declare @sql nvarchar(max)
 declare @role varchar(20)
 declare @rlsWhereClause varchar(1000)
 
+---- Coverholder case -----
+set @group_by_selection = case when @group_by_selection = 'Coverholder' then 'Coverholder_Name' else @group_by_selection end
 
 ----- Get parameters and save each parameters value in separate temp table
 
@@ -208,7 +210,7 @@ print(@flagsWhereClause)
 set @columns = replace(replace(@columns, '",', '],'), '"', 'd.[')
 set @columns = substring(@columns, 0, len(@columns)-2) + ']'
 
-declare @columns_index nvarchar(max) = replace(replace(@columns, 'd.', ''),'[Reporting_Period_End_Date],','')
+declare @columns_index nvarchar(max) = case when @group_by_selection = 'Coverholder_Name' then replace(replace(replace(@columns, 'd.', ''),'[Reporting_Period_End_Date],',''),'[Coverholder_Name],','') else replace(replace(@columns, 'd.', ''),'[Reporting_Period_End_Date],','') end
 
 -- INVALID COLUMNS:
 --Invalid column name 'Date_of_Loss_To'.
@@ -242,8 +244,12 @@ exec(@sql)
 ---- 2) Get UMRs for specified group ----
 drop table if exists ##umr
 
-set @sql = 'select distinct d.[UMR]
-			into ##umr
+create table ##umr (
+	[UMR] varchar(20) null
+)
+
+set @sql = 'insert ##umr ([UMR])
+			select distinct d.[UMR]
 			from [dbo].[rls_filterset_umr_' + @role + '] d
 			join ##rlsIds r on r.[id] = d.[RLS_'+ @role + '_id] '
 			+ @umrWhereClause
@@ -381,26 +387,29 @@ exec(@sql)
 set @sql = 'drop table if exists [export].[getData_' + @id + '_grouped]'
 exec(@sql)
 
+declare @group_by_selection_folder varchar(25) =  case when @group_by_selection = 'Coverholder_Name' then 'Coverholder' else @group_by_selection end
+declare @coverholder_prefix varchar(5) = case when @group_by_selection = 'Coverholder_Name' then 'cg.' else '' end
+
 set @sql = 'select
 	[Reporting_Period_End_Date_Folder]
-	,[' + @group_by_selection + '_Folder]
+	,[' + @group_by_selection_folder + '_Folder]
 	,[umr_rc_cc_sn_File]
 	,[RowsNumber]
-	,''select ' + @columns + ' from [export].[getData_' + @id + '] d where [Reporting_Period_End_Date] = '''''' + convert(varchar(10),[Reporting_Period_End_Date]) + '''''' and [' + @group_by_selection + '] = '''''' + [' + @group_by_selection + '_Folder] + '''''' and [umr_rc_cc_sn] = '''''' + [umr_rc_cc_sn] + '''''''' as [query]
+	,''select ' + @columns + ' from [export].[getData_' + @id + '] d where [Reporting_Period_End_Date] = '''''' + convert(varchar(10),[Reporting_Period_End_Date]) + '''''' and [' + @group_by_selection + '] = '''''' + [' + @group_by_selection_folder + '_Folder] + '''''' and [umr_rc_cc_sn] = '''''' + [umr_rc_cc_sn] + '''''''' as [query]
 into [export].[getData_' + @id + '_grouped]
 from (
 	select distinct
 		''RptDate-'' + convert(varchar(10), [Reporting_Period_End_Date], 32) as [Reporting_Period_End_Date_Folder]
-		,[' + @group_by_selection + '] as [' + @group_by_selection + '_Folder]
+		,' + @coverholder_prefix + '[' + @group_by_selection + '] as [' + @group_by_selection_folder + '_Folder]
 		,cg.[Coverholder_final] + ''-'' + replace([umr_rc_cc_sn],''_'',''-'') + ''-'' + ''(RptDate-'' + convert(varchar(10), [Reporting_Period_End_Date], 32) + '')'' as [umr_rc_cc_sn_File]
 		,count(*) as [RowsNumber]
 		,[umr_rc_cc_sn]
 		,[Reporting_Period_End_Date]
 	from [export].[getData_' + @id + '] e
 	left join ##coverholderGroup cg on cg.[Coverholder_Name] = e.[Coverholder_Name]
-	group by [Reporting_Period_End_Date],[' + @group_by_selection + '] ,[umr_rc_cc_sn],cg.[Coverholder_final]
+	group by [Reporting_Period_End_Date],' + @coverholder_prefix + '[' + @group_by_selection + '] ,[umr_rc_cc_sn],cg.[Coverholder_final]
 ) w
-order by [Reporting_Period_End_Date_Folder],[' + @group_by_selection + '_Folder] ,[umr_rc_cc_sn_File]'
+order by [Reporting_Period_End_Date_Folder],[' + @group_by_selection_folder + '_Folder] ,[umr_rc_cc_sn_File]'
 
 exec(@sql)
 
