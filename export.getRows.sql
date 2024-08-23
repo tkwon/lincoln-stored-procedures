@@ -11,7 +11,7 @@ as
 begin
 
 declare @sql nvarchar(max)
-declare @role varchar(20)
+declare @role varchar(20) = ''
 declare @rlsWhereClause varchar(1000)
 
 ---- Coverholder case -----
@@ -297,7 +297,6 @@ begin
 
 	set @sql = 'insert ##umr ([umr_rc_sn])
 				select distinct d.[umr_rc_sn]
-				into ##umr
 				from [dbo].[rls_filterset_globalumr] d'
 				+ @umrWhereClause
 	
@@ -442,6 +441,7 @@ exec(@sql)
 
 declare @group_by_selection_folder varchar(25) =  case when @group_by_selection = 'Coverholder_Name' then 'Coverholder' else @group_by_selection end
 declare @coverholder_prefix varchar(5) = case when @group_by_selection = 'Coverholder_Name' then 'cg.' else '' end
+set @group_by_selection = case when @group_by_selection = 'Coverholder_Name' then 'Coverholder_final' else @group_by_selection end
 
 set @sql = 'select
 	[Reporting_Period_End_Date_Folder]
@@ -453,7 +453,7 @@ into [export].[getData_' + @id + '_grouped]
 from (
 	select distinct
 		''RptDate-'' + convert(varchar(10), [Reporting_Period_End_Date], 32) as [Reporting_Period_End_Date_Folder]
-		,' + @coverholder_prefix + 'coalesce([' + @group_by_selection + '],'''') as [' + @group_by_selection_folder + '_Folder]
+		,coalesce('+ @coverholder_prefix +'[' + @group_by_selection + '],'''') as [' + @group_by_selection_folder + '_Folder]
 		,cg.[Coverholder_final] + ''-'' + replace([umr_rc_cc_sn],''_'',''-'') + ''-'' + ''(RptDate-'' + convert(varchar(10), [Reporting_Period_End_Date], 32) + '')'' as [umr_rc_cc_sn_File]
 		,count(*) as [RowsNumber]
 		,[umr_rc_cc_sn]
@@ -465,6 +465,7 @@ from (
 order by [Reporting_Period_End_Date_Folder],[' + @group_by_selection_folder + '_Folder] ,[umr_rc_cc_sn_File]'
 
 exec(@sql)
+
 
 end
 
