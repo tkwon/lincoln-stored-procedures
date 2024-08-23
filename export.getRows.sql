@@ -232,16 +232,21 @@ declare @columns_index nvarchar(max) = case when @group_by_selection = 'Coverhol
 
 ---- 1) find the matching Group to the value -----
 
-drop table if exists ##rlsIds
+if @role <> ''
+begin
 
-set @sql = 'select * into ##rlsIds
-			from [dbo].[rls_filterset_rls_' + @role + ']
-			where [parent_id] in (
-				select [id] from [dbo].[rls_filterset_rls_' + @role + '] where ' + @role + ' in (' + @rlsWhereClause + ') and [parent_id] is null
-	)
-'
-exec(@sql)
+	drop table if exists ##rlsIds
+	
+	set @sql = 'select * into ##rlsIds
+				from [dbo].[rls_filterset_rls_' + @role + ']
+				where [parent_id] in (
+					select [id] from [dbo].[rls_filterset_rls_' + @role + '] where ' + @role + ' in (' + @rlsWhereClause + ') and [parent_id] is null
+		)
+	'
+	exec(@sql)
 
+end
+	
 declare @tpaWhereClause varchar(255)
 
 if @role = 'TPA'
@@ -254,24 +259,51 @@ if @role = 'Coverholder'
 	set @coverholderWhereClause = ' and [Coverholder_Name] in (select [Coverholder] from ##rlsIds)'
 else set @coverholderWhereClause = ''
 
+declare @underwriterWhereClause varchar(255)
+
+if @role = 'Underwriter'
+	set @underwriterWhereClause = ' and u.[Underwriter] in (select [underwriter] from ##rlsIds)'
+else set @underwriterWhereClause = ''
+
+
 --select * from ##rlsIds
 
 ---- 2) Get UMRs for specified group ----
 drop table if exists ##umr
 
 create table ##umr (
-	[UMR] varchar(255) null
-	,[Risk_Code] varchar(255) null
-	,[Section_No] varchar(255) null
+	[UMR] nvarchar(128) null
+	,[Risk_Code] nvarchar(64) null
+	,[Section_No] nvarchar(64) null
+	,[umr_rc_sn] nvarchar(256) null
 )
 
-set @sql = 'insert ##umr ([UMR],[Risk_Code],[Section_No])
-			select distinct d.[UMR], coalesce(nullif(d.[Risk_Code],''''), ''0'') as [Risk_Code], coalesce(nullif(d.[Section_No],''''), ''0'') as [Section_No]
-			from [dbo].[rls_filterset_umr_' + @role + '] d
-			join ##rlsIds r on r.[id] = d.[RLS_'+ @role + '_id] '
-			+ @umrWhereClause
+if @role <> ''
+begin
 
-exec(@sql)
+	set @sql = 'insert ##umr ([UMR],[Risk_Code],[Section_No],[umr_rc_sn])
+				select distinct d.[UMR], coalesce(nullif(d.[Risk_Code],''''), ''0'') as [Risk_Code], coalesce(nullif(d.[Section_No],''''), ''0'') as [Section_No]
+					,d.[UMR] + ''_'' + coalesce(nullif(d.[Risk_Code],''''), ''0'') + ''_'' + coalesce(nullif(d.[Section_No],''''), ''0'') as [umr_rc_sn]
+				from [dbo].[rls_filterset_umr_' + @role + '] d
+				join ##rlsIds r on r.[id] = d.[RLS_'+ @role + '_id] '
+				+ @umrWhereClause
+	
+	exec(@sql)
+
+end
+
+if @role = ''
+begin
+
+	set @sql = 'insert ##umr ([umr_rc_sn])
+				select distinct d.[umr_rc_sn]
+				into ##umr
+				from [dbo].[rls_filterset_globalumr] d'
+				+ @umrWhereClause
+	
+	exec(@sql)
+
+end
 
 
 --select * from ##umr
@@ -284,10 +316,11 @@ select distinct
 	g.[umr_rc_cc_sn]
 into #activeUmr
 from [dbo].[rls_filterset_globalumr] g
-join ##umr u on u.[UMR] = g.[umr] and u.[Risk_Code] = coalesce(nullif(g.[Risk_Code],''), '0') and u.[Section_No] = coalesce(nullif(g.[Section_No],''), '0')
+join ##umr u on u.[umr_rc_sn] = g.[umr_rc_sn]
 where g.[bdx_status] = 1
 
 
+--select * from #underwriters
 
 ---- 4) Get list of underwriters and brokers for grouping ----
 
@@ -296,10 +329,11 @@ drop table if exists #underwriters
 select distinct 
 	g.[umr]
 	,rls.[underwriter] as [Underwriter]
+	,rlsumr.[UMR_Risk_Section]
 into #underwriters
 from [dbo].[rls_filterset_globalumr] g
-join ##umr u on u.[UMR] = g.[umr] and u.[Risk_Code] = coalesce(nullif(g.[Risk_Code],''), '0') and u.[Section_No] = coalesce(nullif(g.[Section_No],''), '0')
-left join [dbo].[rls_filterset_umr_underwriter] rlsumr on rlsumr.[umr] = g.[umr]
+join ##umr u on u.[umr_rc_sn] = g.[umr_rc_sn]
+left join [dbo].[rls_filterset_umr_underwriter] rlsumr on rlsumr.[umr] = g.[umr] and coalesce(nullif(rlsumr.[Risk_Code],''), '0') = coalesce(nullif(g.[Risk_Code],''), '0') and coalesce(nullif(rlsumr.[Section_No],''), '0') = coalesce(nullif(g.[Section_No],''), '0')
 join [dbo].[rls_filterset_rls_underwriter] rls on rls.[id] = rlsumr.[RLS_Underwriter_id]
 
 drop table if exists #brokers
@@ -307,10 +341,11 @@ drop table if exists #brokers
 select distinct 
 	g.[umr]
 	,rls.[broker] as [Broker]
+	,rlsumr.[UMR_Risk_Section]
 into #brokers
 from [dbo].[rls_filterset_globalumr] g
-join ##umr u on u.[UMR] = g.[umr]
-left join [dbo].[rls_filterset_umr_broker] rlsumr on rlsumr.[umr] = g.[umr]
+join ##umr u on u.[umr_rc_sn] = g.[umr_rc_sn]
+left join [dbo].[rls_filterset_umr_broker] rlsumr on rlsumr.[umr] = g.[umr] and coalesce(nullif(rlsumr.[Risk_Code],''), '0') = coalesce(nullif(g.[Risk_Code],''), '0') and coalesce(nullif(rlsumr.[Section_No],''), '0') = coalesce(nullif(g.[Section_No],''), '0')
 join [dbo].[rls_filterset_rls_broker] rls on rls.[id] = rlsumr.[RLS_Broker_id]
 
 
@@ -362,13 +397,13 @@ set @sql = 'select u.[Underwriter], b.[Broker], d.[Unique_Market_Reference_UMR] 
 			from [dbo].[rig_datarows] d
 			join #activeUmr a on a.[umr_rc_cc_sn] = d.[Unique_Market_Reference_UMR] + ''_'' + coalesce(nullif(d.[Risk_Code],''''), ''0'') + ''_'' + coalesce(nullif(d.[Lloyds_Cat_Code],''''), ''0'') + ''_'' + coalesce(nullif(d.[Section_No],''''), ''0'')'
 			+ @umr_flags_join + '
-			left join #underwriters u on u.[umr] = d.[Unique_Market_Reference_UMR]
-			left join #brokers b on b.[umr] = d.[Unique_Market_Reference_UMR]'
+			left join #underwriters u on u.[UMR_Risk_Section] = d.[Unique_Market_Reference_UMR] + ''_'' + coalesce(nullif(d.[Risk_Code],''''), ''0'') + ''_'' + coalesce(nullif(d.[Section_No],''''), ''0'')
+			left join #brokers b on b.[UMR_Risk_Section] = d.[Unique_Market_Reference_UMR] + ''_'' + coalesce(nullif(d.[Risk_Code],''''), ''0'') + ''_'' + coalesce(nullif(d.[Section_No],''''), ''0'')'
 			+ @flagsWhereClause
 			+ @reportingPeriodWhereClause 
 			+ @tpaWhereClause
 			+ @coverholderWhereClause
-			+ ' order by [umr_rc_cc_sn]'
+			+ @underwriterWhereClause
 
 --print cast(substring(@sql, 1, 16000) as ntext )
 --print cast(substring(@sql, 16001, 32000) as ntext )
