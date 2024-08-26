@@ -390,7 +390,10 @@ where [rowN] = 1
 set @sql = 'drop table if exists [export].[getData_' + @id + ']'
 exec(@sql)
 
-set @sql = 'select u.[Underwriter], b.[Broker], d.[Unique_Market_Reference_UMR] + ''_'' + coalesce(nullif(d.[Risk_Code],''''), ''0'') + ''_'' + coalesce(nullif(d.[Lloyds_Cat_Code],''''), ''0'') + ''_'' + coalesce(nullif(d.[Section_No],''''), ''0'') as [umr_rc_cc_sn],' 
+set @sql = 'select 
+				u.[Underwriter], b.[Broker]
+				, d.[Unique_Market_Reference_UMR] + ''_'' + coalesce(nullif(d.[Risk_Code],''''), ''0'') + ''_'' + coalesce(nullif(d.[Lloyds_Cat_Code],''''), ''0'') + ''_'' + coalesce(nullif(d.[Section_No],''''), ''0'') as [umr_rc_cc_sn]
+				, d.[Unique_Market_Reference_UMR] + ''_'' + coalesce(nullif(d.[Risk_Code],''''),''0'')  + ''_'' + coalesce(nullif(d.[Section_No],''''),''0'') as [umr_rc_sn],' 
 			+ @columns + '
 			into [export].[getData_' + @id + ']
 			from [dbo].[rig_datarows] d
@@ -423,39 +426,50 @@ exec(@createindexsql)
 
 drop table if exists ##coverholderGroup
 
-set @sql = 'select distinct
-	e.[Coverholder_Name]
-	,case 
-		when c.[parent_id] is null then coalesce(c.[coverholder],''Missing'')
-		else coalesce(cc.[coverholder],''Missing'')
-	end as [Coverholder_final]
-	,coalesce(c.[parent_id],0) as [parent_id]
-into ##coverholderGroup
-from [export].[getData_' + @id + '] e
-left join [dbo].[rls_filterset_rls_coverholder] c on c.[coverholder] = e.[Coverholder_Name]
-left join [dbo].[rls_filterset_rls_coverholder] cc on cc.[id] = c.[parent_id]'
-
-exec(@sql)
-
-drop table if exists ##coverholderFinal
-
 set @sql = 'select
-	[umr_rc_cc_sn]
+	[umr_rc_sn]
 	,[Coverholder_final]
-into ##coverholderFinal
+into ##coverholderGroup
 from (
-select 
-	 e.[umr_rc_cc_sn]
-	,e.[Coverholder_Name]
-	,cg.[Coverholder_final]
-	,cg.[parent_id]
-	,row_number() over(partition by e.[umr_rc_cc_sn],e.[Coverholder_Name] order by coalesce(cg.[parent_id],0)) as [rowN]
-from [export].[getData_' + @id + '] e
-left join ##coverholderGroup cg on cg.[Coverholder_Name] = e.[Coverholder_Name]
-) w 
-where [rowN] = 1'
+	select 
+		e.[umr_rc_sn]
+		,c.[RLS_Coverholder_id]
+		,crls.[coverholder]
+		,crls.[parent_id]
+		,case 
+			when crls.[parent_id] is null then coalesce(crls.[coverholder],''Missing'')
+			else coalesce(ccrls.[coverholder],''Missing'')
+		end as [Coverholder_final]
+		,row_number() over(partition by e.[umr_rc_sn] order by crls.[parent_id]) as [rowN]
+	from [export].[getData_' + @id + '] e
+	join [dbo].[rls_filterset_umr_coverholder] c on c.[UMR_Risk_Section] = e.[umr_rc_sn]
+	join [dbo].[rls_filterset_rls_coverholder] crls on crls.[id] = c.[RLS_Coverholder_id]
+	left join [dbo].[rls_filterset_rls_coverholder] ccrls on ccrls.[id] = crls.[parent_id]
+) w
+where [rowN] = 1
+'
 
 exec(@sql)
+
+--drop table if exists ##coverholderFinal
+
+--set @sql = 'select
+--	[umr_rc_cc_sn]
+--	,[Coverholder_final]
+--into ##coverholderFinal
+--from (
+--select 
+--	 e.[umr_rc_cc_sn]
+--	,e.[Coverholder_Name]
+--	,cg.[Coverholder_final]
+--	,cg.[parent_id]
+--	,row_number() over(partition by e.[umr_rc_cc_sn],e.[Coverholder_Name] order by coalesce(cg.[parent_id],0)) as [rowN]
+--from [export].[getData_' + @id + '] e
+--left join ##coverholderGroup cg on cg.[Coverholder_Name] = e.[Coverholder_Name]
+--) w 
+--where [rowN] = 1'
+
+--exec(@sql)
 
 set @sql = 'drop table if exists [export].[getData_' + @id + '_grouped]'
 exec(@sql)
@@ -480,7 +494,7 @@ from (
 		,e.[umr_rc_cc_sn]
 		,[Reporting_Period_End_Date]
 	from [export].[getData_' + @id + '] e
-	left join ##coverholderFinal cg on cg.[umr_rc_cc_sn] = e.[umr_rc_cc_sn]
+	left join ##coverholderGroup cg on cg.[umr_rc_sn] = e.[umr_rc_sn]
 	group by [Reporting_Period_End_Date],' + @coverholder_prefix + '[' + @group_by_selection + '] ,e.[umr_rc_cc_sn],cg.[Coverholder_final]
 ) w
 order by [Reporting_Period_End_Date_Folder],[' + @group_by_selection_folder + '_Folder] ,[umr_rc_cc_sn_File]'
