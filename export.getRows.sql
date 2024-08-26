@@ -429,10 +429,31 @@ set @sql = 'select distinct
 		when c.[parent_id] is null then coalesce(c.[coverholder],''Missing'')
 		else coalesce(cc.[coverholder],''Missing'')
 	end as [Coverholder_final]
+	,coalesce(c.[parent_id],0) as [parent_id]
 into ##coverholderGroup
 from [export].[getData_' + @id + '] e
 left join [dbo].[rls_filterset_rls_coverholder] c on c.[coverholder] = e.[Coverholder_Name]
 left join [dbo].[rls_filterset_rls_coverholder] cc on cc.[id] = c.[parent_id]'
+
+exec(@sql)
+
+drop table if exists ##coverholderFinal
+
+set @sql = 'select
+	[umr_rc_cc_sn]
+	,[Coverholder_final]
+into ##coverholderFinal
+from (
+select 
+	 e.[umr_rc_cc_sn]
+	,e.[Coverholder_Name]
+	,cg.[Coverholder_final]
+	,cg.[parent_id]
+	,row_number() over(partition by e.[umr_rc_cc_sn],e.[Coverholder_Name] order by coalesce(cg.[parent_id],0)) as [rowN]
+from [export].[getData_' + @id + '] e
+left join ##coverholderGroup cg on cg.[Coverholder_Name] = e.[Coverholder_Name]
+) w 
+where [rowN] = 1'
 
 exec(@sql)
 
@@ -454,13 +475,13 @@ from (
 	select distinct
 		''RptDate-'' + convert(varchar(10), [Reporting_Period_End_Date], 32) as [Reporting_Period_End_Date_Folder]
 		,coalesce('+ @coverholder_prefix +'[' + @group_by_selection + '],'''') as [' + @group_by_selection_folder + '_Folder]
-		,cg.[Coverholder_final] + ''-'' + replace([umr_rc_cc_sn],''_'',''-'') + ''-'' + ''(RptDate-'' + convert(varchar(10), [Reporting_Period_End_Date], 32) + '')'' as [umr_rc_cc_sn_File]
+		,cg.[Coverholder_final] + ''-'' + replace(e.[umr_rc_cc_sn],''_'',''-'') + ''-'' + ''(RptDate-'' + convert(varchar(10), [Reporting_Period_End_Date], 32) + '')'' as [umr_rc_cc_sn_File]
 		,count(*) as [RowsNumber]
-		,[umr_rc_cc_sn]
+		,e.[umr_rc_cc_sn]
 		,[Reporting_Period_End_Date]
 	from [export].[getData_' + @id + '] e
-	left join ##coverholderGroup cg on cg.[Coverholder_Name] = e.[Coverholder_Name]
-	group by [Reporting_Period_End_Date],' + @coverholder_prefix + '[' + @group_by_selection + '] ,[umr_rc_cc_sn],cg.[Coverholder_final]
+	left join ##coverholderFinal cg on cg.[umr_rc_cc_sn] = e.[umr_rc_cc_sn]
+	group by [Reporting_Period_End_Date],' + @coverholder_prefix + '[' + @group_by_selection + '] ,e.[umr_rc_cc_sn],cg.[Coverholder_final]
 ) w
 order by [Reporting_Period_End_Date_Folder],[' + @group_by_selection_folder + '_Folder] ,[umr_rc_cc_sn_File]'
 
