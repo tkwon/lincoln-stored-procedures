@@ -185,12 +185,16 @@ from (
 declare @i tinyint = 1
 declare @rows tinyint = (select max([rowN]) from #flags)
 declare @flagsWhereClause varchar(255) = 'where uf.[Flag] in ('
-declare @currentName varchar(25)
+declare @currentName varchar(25) = ''
 --declare @currentValue char(1)
 
 while @i <= @rows
 	begin
 		set @currentName = (select [name] from #flags where [rowN] = @i and [value] = 1)
+		if @currentName is null
+			begin
+				set @currentName = 'Missing'
+			end
 		--set @currentValue = (select [value] from #flags where [rowN] = @i)
 
 		set @flagsWhereClause = @flagsWhereClause + '''' + @currentName + ''''
