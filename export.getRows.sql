@@ -368,7 +368,7 @@ drop table if exists ##temp
 set @sql = 'select ' + @group_by_columns + ' 
 				,[Critical_Error_Flag]
 				,[Non_Critical_Flag]
-				,row_number() over(partition by ' + @group_by_columns + ' order by ' + @group_by_columns + ', [Critical_Error_Flag] desc) as [rowN]
+				,row_number() over(partition by ' + @group_by_columns + ' order by ' + @group_by_columns + ', [Critical_Error_Flag], [Non_Critical_Flag] desc) as [rowN]
 			into ##temp
 			from (	
 				select distinct ' + @group_by_columns + '
