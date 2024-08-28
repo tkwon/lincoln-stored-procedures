@@ -23,47 +23,99 @@ set @group_by_selection = case
 ----- Get parameters and save each parameters value in separate temp table
 
 drop table if exists #parametersJson
+drop table if exists #parametersDateRange
+drop table if exists #parameters
+
 
 select @parameters as [parametrs] into #parametersJson
 
-drop table if exists #parameters
 
 select
-	 w.[name]
-	,w.[value]
-	,row_number() over(order by [name]) as [rowN]
+     [name]
+	 ,[type]
+    ,[value]
+    ,row_number() over(order by [name]) as [rowN]
+into #parametersDateRange
+from (
+    select 
+        [name]
+		,[type]
+        ,case
+            when isjson([value]) = 1 then null
+            else [value] 
+        end as [value]
+    from #parametersJson
+    cross apply openjson([parametrs])
+    with (
+		[name] varchar(2000)
+		,[type] varchar(50)
+		,[value] nvarchar(max)
+    ) as ExtractedData
+) as ParsedData
+where [value] is not null
+
+select
+    [name]
+    , [value]
+     ,row_number() over(order by [name]) as [rowN]
 into #parameters
 from (
-	select 
-		o.[name]
-		,o.[value] as [value]
-	from #parametersJson f
-	cross apply openjson([parametrs])
-	with (
+    select 
+        [name],
+        [value]
+    from #parametersJson
+    cross apply openjson([parametrs])
+    with (
 		[name] varchar(2000)
 		,[value] nvarchar(max) as json
-	) o
-) w
+    ) as ExtractedData
+) as ParsedData
+where isjson([value]) = 1
 
 ---- Reporting Period -----
 
-drop table if exists #reportingPeriodEndDate
-
-select 
-	[name]
-	,cast(ltrim(rtrim(replace(replace(replace(replace(s.[value], char(10), char(32)),char(13), char(32)),char(160), char(32)),char(9),char(32)))) as date) as [date]
-into #reportingPeriodEndDate
-from #parameters p
-cross apply string_split(trim('[""] ' from replace(p.[value],'"','')), ',') s
-where [name] = 'Reporting_Period_End_Date'
-
-
 declare @reportingPeriodWhereClause varchar(2000)
 
-if (select count(*) from #reportingPeriodEndDate) > 0
-	set @reportingPeriodWhereClause = ' and [Reporting_Period_End_Date] in (select [date] from #reportingPeriodEndDate)'
+if (select count(*) from #parametersDateRange) > 0
+	begin
+		declare @startDate varchar(10)
+		declare @endDate varchar(10)
+		
+		drop table if exists #dateRange
+
+		select 
+			[name]
+			,cast(s.[value] as date) as [date]
+			,row_number() over(order by cast(s.[value] as date)) as [rowN]
+		into #dateRange
+		from #parametersDateRange
+		cross apply string_split(trim('[""] ' from replace([value],'"','')), ',') s
+
+		set @startDate = (select [date] from #dateRange where [rowN] = 1)
+		set @endDate = (select [date] from #dateRange where [rowN] = 2)
+
+		set @reportingPeriodWhereClause = ' and [Reporting_Period_End_Date] between ''' + @startDate + ''' and ''' + @endDate + ''''
+
+	end
 else
-	set @reportingPeriodWhereClause = ''
+	begin
+		drop table if exists #reportingPeriodEndDate
+		
+		select 
+			[name]
+			,cast(ltrim(rtrim(replace(replace(replace(replace(s.[value], char(10), char(32)),char(13), char(32)),char(160), char(32)),char(9),char(32)))) as date) as [date]
+		into #reportingPeriodEndDate
+		from #parameters p
+		cross apply string_split(trim('[""] ' from replace(p.[value],'"','')), ',') s
+		where [name] = 'Reporting_Period_End_Date'
+		
+		
+		if (select count(*) from #reportingPeriodEndDate) > 0
+			set @reportingPeriodWhereClause = ' and [Reporting_Period_End_Date] in (select [date] from #reportingPeriodEndDate)'
+		else
+			set @reportingPeriodWhereClause = ''
+
+	end
 
 
 ---- TPA -----
