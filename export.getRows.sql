@@ -494,15 +494,15 @@ set @group_by_selection = case when @group_by_selection = 'Coverholder_Name' the
 
 set @sql = 'select
 	[Reporting_Period_End_Date_Folder]
-	,[' + @group_by_selection_folder + '_Folder]
+	,[Group_By_Selection_Folder]
 	,[umr_rc_cc_sn_File]
 	,[RowsNumber]
-	,''select ' + @columns + ' from [export].[getData_' + @id + '] d where [Reporting_Period_End_Date] = '''''' + convert(varchar(10),[Reporting_Period_End_Date]) + '''''' and coalesce([' + @group_by_selection + '],'''''''') = '''''' + [' + @group_by_selection_folder + '_Folder] + '''''' and [umr_rc_cc_sn] = '''''' + [umr_rc_cc_sn] + '''''''' as [query]
+	,''select ' + @columns + ' from [export].[getData_' + @id + '] d where [Reporting_Period_End_Date] = '''''' + convert(varchar(10),[Reporting_Period_End_Date]) + '''''' and coalesce([' + @group_by_selection + '],'''''''') = '''''' + [Group_By_Selection_Folder] + '''''' and [umr_rc_cc_sn] = '''''' + [umr_rc_cc_sn] + '''''''' as [query]
 into [export].[getData_' + @id + '_grouped]
 from (
 	select distinct
 		''RptDate-'' + convert(varchar(10), [Reporting_Period_End_Date], 32) as [Reporting_Period_End_Date_Folder]
-		,coalesce('+ @coverholder_prefix +'[' + @group_by_selection + '],'''') as [' + @group_by_selection_folder + '_Folder]
+		,coalesce('+ @coverholder_prefix +'[' + @group_by_selection + '],'''') as [Group_By_Selection_Folder]
 		,cg.[Coverholder_final] + ''-'' + replace(e.[umr_rc_cc_sn],''_'',''-'') + ''-'' + ''(RptDate-'' + convert(varchar(10), [Reporting_Period_End_Date], 32) + '')'' as [umr_rc_cc_sn_File]
 		,count(*) as [RowsNumber]
 		,e.[umr_rc_cc_sn]
@@ -511,7 +511,7 @@ from (
 	left join ##coverholderGroup cg on cg.[umr_rc_sn] = e.[umr_rc_sn]
 	group by [Reporting_Period_End_Date],' + @coverholder_prefix + '[' + @group_by_selection + '] ,e.[umr_rc_cc_sn],cg.[Coverholder_final]
 ) w
-order by [Reporting_Period_End_Date_Folder],[' + @group_by_selection_folder + '_Folder] ,[umr_rc_cc_sn_File]'
+order by [Reporting_Period_End_Date_Folder],[Group_By_Selection_Folder] ,[umr_rc_cc_sn_File]'
 
 exec(@sql)
 
