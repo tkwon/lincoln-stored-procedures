@@ -15,8 +15,10 @@ declare @sql nvarchar(max)
 declare @role varchar(20) = ''
 declare @rlsWhereClause varchar(1000)
 
----- Coverholder case -----
-set @group_by_selection = case when @group_by_selection = 'Coverholder' then 'Coverholder_Name' else @group_by_selection end
+---- No grouping case -----
+set @group_by_selection = case 
+							when @group_by_selection = '' then 'None'
+							else @group_by_selection end
 
 ----- Get parameters and save each parameters value in separate temp table
 
@@ -218,7 +220,7 @@ if @flags = '[]'
 set @columns = replace(replace(@columns, '",', '],'), '"', 'd.[')
 set @columns = substring(@columns, 0, len(@columns)-2) + ']'
 
-declare @columns_index nvarchar(max) = case when @group_by_selection = 'Coverholder_Name' then replace(replace(replace(replace(@columns, 'd.', ''),'[Reporting_Period_End_Date],',''),'[Reporting_Period_End_Date]',''),'[Coverholder_Name],','') else replace(replace(replace(@columns, 'd.', ''),'[Reporting_Period_End_Date],',''),'[Reporting_Period_End_Date]','') end
+declare @columns_index nvarchar(max) = replace(replace(replace(@columns, 'd.', ''),'[Reporting_Period_End_Date],',''),'[Reporting_Period_End_Date]','')
 
 -- INVALID COLUMNS:
 --Invalid column name 'Date_of_Loss_To'.
@@ -401,15 +403,14 @@ where [rowN] = 1
 
 ---- 5) Get rows from datarows table (based on user's columns and flags selection) -----
 
-set @sql = 'drop table if exists [export].[getData_' + @id + ']'
-exec(@sql)
+drop table if exists ##tempExport
 
 set @sql = 'select 
-				u.[Underwriter], b.[Broker]
+				u.[Underwriter], b.[Broker], ''None'' as [None]
 				, d.[Unique_Market_Reference_UMR] + ''_'' + coalesce(nullif(d.[Risk_Code],''''), ''0'') + ''_'' + coalesce(nullif(d.[Lloyds_Cat_Code],''''), ''0'') + ''_'' + coalesce(nullif(d.[Section_No],''''), ''0'') as [umr_rc_cc_sn]
 				, d.[Unique_Market_Reference_UMR] + ''_'' + coalesce(nullif(d.[Risk_Code],''''),''0'')  + ''_'' + coalesce(nullif(d.[Section_No],''''),''0'') as [umr_rc_sn],' 
 			+ @columns + '
-			into [export].[getData_' + @id + ']
+			into ##tempExport
 			from [dbo].[rig_datarows] d
 			join ##activeUmr a on a.[umr_rc_cc_sn] = d.[Unique_Market_Reference_UMR] + ''_'' + coalesce(nullif(d.[Risk_Code],''''), ''0'') + ''_'' + coalesce(nullif(d.[Lloyds_Cat_Code],''''), ''0'') + ''_'' + coalesce(nullif(d.[Section_No],''''), ''0'')'
 			+ @umr_flags_join + '
@@ -421,22 +422,8 @@ set @sql = 'select
 			+ @coverholderWhereClause
 			+ @underwriterWhereClause
 
---print cast(substring(@sql, 1, 16000) as ntext )
---print cast(substring(@sql, 16001, 32000) as ntext )
-
 exec(@sql)
 
----- create index on new table ----
-
-declare @createindexsql nvarchar(max)
-
-set @createindexsql = 'create nonclustered index ix_nc_exportGetData_' + @id + ' on [export].[getData_' + @id + '] ([Reporting_Period_End_Date], [umr_rc_cc_sn], [' + @group_by_selection + ']) include (' + @columns_index + ')'
-
-exec(@createindexsql)
-
---select top 1000 * from ##tempResult
-
----- 6) Grouping data ----
 
 drop table if exists ##coverholderGroup
 
@@ -455,7 +442,7 @@ from (
 			else coalesce(ccrls.[coverholder],''Missing'')
 		end as [Coverholder_final]
 		,row_number() over(partition by e.[umr_rc_sn] order by crls.[parent_id]) as [rowN]
-	from [export].[getData_' + @id + '] e
+	from ##tempExport e
 	join [dbo].[rls_filterset_umr_coverholder] c on c.[UMR_Risk_Section] = e.[umr_rc_sn]
 	join [dbo].[rls_filterset_rls_coverholder] crls on crls.[id] = c.[RLS_Coverholder_id]
 	left join [dbo].[rls_filterset_rls_coverholder] ccrls on ccrls.[id] = crls.[parent_id]
@@ -465,36 +452,39 @@ where [rowN] = 1
 
 exec(@sql)
 
---drop table if exists ##coverholderFinal
+set @sql = 'drop table if exists [export].[getData_' + @id + ']'
+exec(@sql)
 
---set @sql = 'select
---	[umr_rc_cc_sn]
---	,[Coverholder_final]
---into ##coverholderFinal
---from (
---select 
---	 e.[umr_rc_cc_sn]
---	,e.[Coverholder_Name]
---	,cg.[Coverholder_final]
---	,cg.[parent_id]
---	,row_number() over(partition by e.[umr_rc_cc_sn],e.[Coverholder_Name] order by coalesce(cg.[parent_id],0)) as [rowN]
---from [export].[getData_' + @id + '] e
---left join ##coverholderGroup cg on cg.[Coverholder_Name] = e.[Coverholder_Name]
---) w 
---where [rowN] = 1'
+set @sql = 'select 
+	c.[Coverholder_final] as [Coverholder]
+	,e.*
+	into [export].[getData_' + @id + ']
+	from ##tempExport e
+	left join ##coverholderGroup c on c.[umr_rc_sn] = e.[umr_rc_sn]'
 
---exec(@sql)
+exec(@sql)
+
+---- create index on new table ----
+
+declare @createindexsql nvarchar(max)
+
+set @createindexsql = 'create nonclustered index ix_nc_exportGetData_' + @id + ' on [export].[getData_' + @id + '] ([Reporting_Period_End_Date], [umr_rc_cc_sn], [' + @group_by_selection + ']) include (' + @columns_index + ')'
+
+exec(@createindexsql)
+
+---- 6) Grouping data ----
 
 set @sql = 'drop table if exists [export].[getData_' + @id + '_grouped]'
 exec(@sql)
 
-declare @group_by_selection_folder varchar(25) =  case when @group_by_selection = 'Coverholder_Name' then 'Coverholder' else @group_by_selection end
-declare @coverholder_prefix varchar(5) = case when @group_by_selection = 'Coverholder_Name' then 'cg.' else '' end
-set @group_by_selection = case when @group_by_selection = 'Coverholder_Name' then 'Coverholder_final' else @group_by_selection end
+
+--declare @group_by_selection_folder varchar(25) =  case when @group_by_selection = 'Coverholder_Name' then 'Coverholder' else @group_by_selection end
+--declare @coverholder_prefix varchar(5) = case when @group_by_selection = 'Coverholder_Name' then 'cg.' else '' end
+--set @group_by_selection = case when @group_by_selection = 'Coverholder_Name' then 'Coverholder_final' else @group_by_selection end
 
 set @sql = 'select
 	[Reporting_Period_End_Date_Folder]
-	,[Group_By_Selection_Folder]
+	,coalesce(nullif([Group_By_Selection_Folder],''None''),'''') as [Group_By_Selection_Folder]
 	,[umr_rc_cc_sn_File]
 	,[RowsNumber]
 	,''select ' + @columns + ' from [export].[getData_' + @id + '] d where [Reporting_Period_End_Date] = '''''' + convert(varchar(10),[Reporting_Period_End_Date]) + '''''' and coalesce([' + @group_by_selection + '],'''''''') = '''''' + [Group_By_Selection_Folder] + '''''' and [umr_rc_cc_sn] = '''''' + [umr_rc_cc_sn] + '''''''' as [query]
@@ -502,16 +492,17 @@ into [export].[getData_' + @id + '_grouped]
 from (
 	select distinct
 		''RptDate-'' + convert(varchar(10), [Reporting_Period_End_Date], 32) as [Reporting_Period_End_Date_Folder]
-		,coalesce('+ @coverholder_prefix +'[' + @group_by_selection + '],'''') as [Group_By_Selection_Folder]
-		,cg.[Coverholder_final] + ''-'' + replace(e.[umr_rc_cc_sn],''_'',''-'') + ''-'' + ''(RptDate-'' + convert(varchar(10), [Reporting_Period_End_Date], 32) + '')'' as [umr_rc_cc_sn_File]
+		,coalesce([' + @group_by_selection + '],'''') as [Group_By_Selection_Folder]
+		,[Coverholder] + ''-'' + replace(e.[umr_rc_cc_sn],''_'',''-'') + ''-'' + ''(RptDate-'' + convert(varchar(10), [Reporting_Period_End_Date], 32) + '')'' as [umr_rc_cc_sn_File]
 		,count(*) as [RowsNumber]
 		,e.[umr_rc_cc_sn]
 		,[Reporting_Period_End_Date]
 	from [export].[getData_' + @id + '] e
-	left join ##coverholderGroup cg on cg.[umr_rc_sn] = e.[umr_rc_sn]
-	group by [Reporting_Period_End_Date],' + @coverholder_prefix + '[' + @group_by_selection + '] ,e.[umr_rc_cc_sn],cg.[Coverholder_final]
+	group by [Reporting_Period_End_Date],[' + @group_by_selection + '] ,e.[umr_rc_cc_sn],[Coverholder]
 ) w
 order by [Reporting_Period_End_Date_Folder],[Group_By_Selection_Folder] ,[umr_rc_cc_sn_File]'
+
+
 
 exec(@sql)
 
