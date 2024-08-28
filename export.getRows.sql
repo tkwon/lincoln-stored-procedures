@@ -5,6 +5,7 @@ create or alter procedure [export].[sp_getData]
 	,@group_by_selection varchar(100)
 	,@id varchar(20)
 	,@group_by varchar(255)
+	,@umr_criteria varchar(20)
 
 as
 
@@ -217,7 +218,7 @@ if @flags = '[]'
 set @columns = replace(replace(@columns, '",', '],'), '"', 'd.[')
 set @columns = substring(@columns, 0, len(@columns)-2) + ']'
 
-declare @columns_index nvarchar(max) = case when @group_by_selection = 'Coverholder_Name' then replace(replace(replace(@columns, 'd.', ''),'[Reporting_Period_End_Date],',''),'[Coverholder_Name],','') else replace(replace(@columns, 'd.', ''),'[Reporting_Period_End_Date],','') end
+declare @columns_index nvarchar(max) = case when @group_by_selection = 'Coverholder_Name' then replace(replace(replace(replace(@columns, 'd.', ''),'[Reporting_Period_End_Date],',''),'[Reporting_Period_End_Date]',''),'[Coverholder_Name],','') else replace(replace(replace(@columns, 'd.', ''),'[Reporting_Period_End_Date],',''),'[Reporting_Period_End_Date]','') end
 
 -- INVALID COLUMNS:
 --Invalid column name 'Date_of_Loss_To'.
@@ -313,14 +314,28 @@ end
 --select * from #activeUmr
 
 ---- 3) Get active umrs ----
-drop table if exists #activeUmr
 
-select distinct
+declare @activeWhereClause varchar(50)
+
+if @umr_criteria = 'Active'
+	set @activeWhereClause = 'where g.[bdx_status] = 1'
+
+if @umr_criteria = 'Inactive'
+	set @activeWhereClause = 'where g.[bdx_status] = 0'
+
+if @umr_criteria = 'All'
+	set @activeWhereClause = 'where g.[bdx_status] in (0,1)'
+
+drop table if exists ##activeUmr
+
+set @sql = 'select distinct
 	g.[umr_rc_cc_sn]
-into #activeUmr
-from [dbo].[rls_filterset_globalumr] g
-join ##umr u on u.[umr_rc_sn] = g.[umr_rc_sn]
-where g.[bdx_status] = 1
+	into ##activeUmr
+	from [dbo].[rls_filterset_globalumr] g
+	join ##umr u on u.[umr_rc_sn] = g.[umr_rc_sn]'
+	+ @activeWhereClause
+
+exec(@sql)
 
 
 --select * from #underwriters
@@ -360,7 +375,7 @@ set @sql = 'select ' + @group_by_columns + '
 						,dir.[Critical_Error_Flag]
 						,dir.[Non_Critical_Flag]
 				from [dbo].[rig_datarows] d
-				join #activeUmr a on a.[umr_rc_cc_sn] = d.[Unique_Market_Reference_UMR] + ''_'' + coalesce(nullif(d.[Risk_Code],''''), ''0'') + ''_'' + coalesce(nullif(d.[Lloyds_Cat_Code],''''), ''0'') + ''_'' + coalesce(nullif(d.[Section_No],''''), ''0'')
+				join ##activeUmr a on a.[umr_rc_cc_sn] = d.[Unique_Market_Reference_UMR] + ''_'' + coalesce(nullif(d.[Risk_Code],''''), ''0'') + ''_'' + coalesce(nullif(d.[Lloyds_Cat_Code],''''), ''0'') + ''_'' + coalesce(nullif(d.[Section_No],''''), ''0'')
 				join [dbo].[rig_dataintegrityrules] dir on dir.[data_row_id] = d.[id] '
 				+ @reportingPeriodWhereClause +
 				' ) w'
@@ -396,7 +411,7 @@ set @sql = 'select
 			+ @columns + '
 			into [export].[getData_' + @id + ']
 			from [dbo].[rig_datarows] d
-			join #activeUmr a on a.[umr_rc_cc_sn] = d.[Unique_Market_Reference_UMR] + ''_'' + coalesce(nullif(d.[Risk_Code],''''), ''0'') + ''_'' + coalesce(nullif(d.[Lloyds_Cat_Code],''''), ''0'') + ''_'' + coalesce(nullif(d.[Section_No],''''), ''0'')'
+			join ##activeUmr a on a.[umr_rc_cc_sn] = d.[Unique_Market_Reference_UMR] + ''_'' + coalesce(nullif(d.[Risk_Code],''''), ''0'') + ''_'' + coalesce(nullif(d.[Lloyds_Cat_Code],''''), ''0'') + ''_'' + coalesce(nullif(d.[Section_No],''''), ''0'')'
 			+ @umr_flags_join + '
 			left join #underwriters u on u.[UMR_Risk_Section] = d.[Unique_Market_Reference_UMR] + ''_'' + coalesce(nullif(d.[Risk_Code],''''), ''0'') + ''_'' + coalesce(nullif(d.[Section_No],''''), ''0'')
 			left join #brokers b on b.[UMR] = d.[Unique_Market_Reference_UMR]'
