@@ -341,16 +341,11 @@ join [dbo].[rls_filterset_rls_underwriter] rls on rls.[id] = rlsumr.[RLS_Underwr
 
 drop table if exists #brokers
 
-select distinct 
-	g.[umr]
-	,rls.[broker] as [Broker]
-	,rlsumr.[UMR_Risk_Section]
+select distinct
+	[UMR]
+	,left([UMR],5) as [Broker]
 into #brokers
-from [dbo].[rls_filterset_globalumr] g
-join ##umr u on u.[umr_rc_sn] = g.[umr_rc_sn]
-left join [dbo].[rls_filterset_umr_broker] rlsumr on rlsumr.[umr] = g.[umr] and coalesce(nullif(rlsumr.[Risk_Code],''), '0') = coalesce(nullif(g.[Risk_Code],''), '0') and coalesce(nullif(rlsumr.[Section_No],''), '0') = coalesce(nullif(g.[Section_No],''), '0')
-join [dbo].[rls_filterset_rls_broker] rls on rls.[id] = rlsumr.[RLS_Broker_id]
-
+from ##umr
 
 ---- Assigning flags to UMRs -----
 
@@ -404,7 +399,7 @@ set @sql = 'select
 			join #activeUmr a on a.[umr_rc_cc_sn] = d.[Unique_Market_Reference_UMR] + ''_'' + coalesce(nullif(d.[Risk_Code],''''), ''0'') + ''_'' + coalesce(nullif(d.[Lloyds_Cat_Code],''''), ''0'') + ''_'' + coalesce(nullif(d.[Section_No],''''), ''0'')'
 			+ @umr_flags_join + '
 			left join #underwriters u on u.[UMR_Risk_Section] = d.[Unique_Market_Reference_UMR] + ''_'' + coalesce(nullif(d.[Risk_Code],''''), ''0'') + ''_'' + coalesce(nullif(d.[Section_No],''''), ''0'')
-			left join #brokers b on b.[UMR_Risk_Section] = d.[Unique_Market_Reference_UMR] + ''_'' + coalesce(nullif(d.[Risk_Code],''''), ''0'') + ''_'' + coalesce(nullif(d.[Section_No],''''), ''0'')'
+			left join #brokers b on b.[UMR] = d.[Unique_Market_Reference_UMR]'
 			+ @flagsWhereClause
 			+ @reportingPeriodWhereClause 
 			+ @tpaWhereClause
