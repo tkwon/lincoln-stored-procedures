@@ -269,23 +269,48 @@ if @flags = '[]'
 
 ---- Columns -----
 
-set @columns = replace(replace(@columns, '",', '],'), '"', 'd.[')
-set @columns = substring(@columns, 0, len(@columns)-2) + ']'
+drop table if exists #columns
 
-declare @columns_index nvarchar(max) = replace(replace(replace(@columns, 'd.', ''),'[Reporting_Period_End_Date],',''),'[Reporting_Period_End_Date]','')
+select 
+	value as [Column]
+	,'d.[' + value + ']' as [ColumnFinal]
+	,row_number() over(partition by value order by value) as [rowN]
+into #columns
+from openjson(@columns)
 
--- INVALID COLUMNS:
---Invalid column name 'Date_of_Loss_To'.
---Invalid column name 'Reg_No_of_Vehicle_etc'.
---Invalid column name 'Ceded_Reinsurance'.
---Invalid column name 'Plan'.
---Invalid column name 'Patient_Name'.
---Invalid column name 'Treatment_Type'.
---Invalid column name 'Country_of_Treatment'.
---Invalid column name 'Date_of_Treatment'.
---Invalid column name 'BDX_Key'.
 
--- Duplicated: Date_Coverage_Confirmed 
+-- delete duplicated columns
+delete from #columns where [rowN] <> 1
+
+-- delete invalid columns
+delete from #columns where [Column] in (
+ 'Date_of_Loss_To'
+,'Reg_No_of_Vehicle_etc'
+,'Ceded_Reinsurance'
+,'Plan'
+,'Patient_Name'
+,'Treatment_Type'
+,'Country_of_Treatment'
+,'Date_of_Treatment'
+,'BDX_Key'
+)
+
+
+declare @columnsSelect nvarchar(max)
+
+set @columnsSelect = (select string_agg([ColumnFinal],', ') from #columns)
+
+
+drop table if exists #columnsIndex
+
+select [Column]
+into #columnsIndex
+from #columns
+where [Column] <> 'Reporting_Period_End_Date'
+
+declare @columnsIndex nvarchar(max)
+
+set @columnsIndex = (select string_agg([Column],', ') from #columnsIndex)
 
 
 
@@ -461,7 +486,7 @@ set @sql = 'select
 				u.[Underwriter], b.[Broker], ''None'' as [None]
 				, d.[Unique_Market_Reference_UMR] + ''_'' + coalesce(nullif(d.[Risk_Code],''''), ''0'') + ''_'' + coalesce(nullif(d.[Lloyds_Cat_Code],''''), ''0'') + ''_'' + coalesce(nullif(d.[Section_No],''''), ''0'') as [umr_rc_cc_sn]
 				, d.[Unique_Market_Reference_UMR] + ''_'' + coalesce(nullif(d.[Risk_Code],''''),''0'')  + ''_'' + coalesce(nullif(d.[Section_No],''''),''0'') as [umr_rc_sn],' 
-			+ @columns + '
+			+ @columnsSelect + '
 			into ##tempExport
 			from [dbo].[rig_datarows] d
 			join ##activeUmr a on a.[umr_rc_cc_sn] = d.[Unique_Market_Reference_UMR] + ''_'' + coalesce(nullif(d.[Risk_Code],''''), ''0'') + ''_'' + coalesce(nullif(d.[Lloyds_Cat_Code],''''), ''0'') + ''_'' + coalesce(nullif(d.[Section_No],''''), ''0'')'
@@ -520,7 +545,7 @@ exec(@sql)
 
 declare @createindexsql nvarchar(max)
 
-set @createindexsql = 'create nonclustered index ix_nc_exportGetData_' + @id + ' on [export].[getData_' + @id + '] ([Reporting_Period_End_Date], [umr_rc_cc_sn], [' + @group_by_selection + ']) include (' + @columns_index + ')'
+set @createindexsql = 'create nonclustered index ix_nc_exportGetData_' + @id + ' on [export].[getData_' + @id + '] ([Reporting_Period_End_Date], [umr_rc_cc_sn], [' + @group_by_selection + ']) include (' + @columnsIndex + ')'
 
 exec(@createindexsql)
 
@@ -539,7 +564,7 @@ set @sql = 'select
 	,coalesce(nullif([Group_By_Selection_Folder],''None''),'''') as [Group_By_Selection_Folder]
 	,[umr_rc_cc_sn_File]
 	,[RowsNumber]
-	,''select ' + @columns + ' from [export].[getData_' + @id + '] d where [Reporting_Period_End_Date] = '''''' + convert(varchar(10),[Reporting_Period_End_Date]) + '''''' and coalesce([' + @group_by_selection + '],'''''''') = '''''' + [Group_By_Selection_Folder] + '''''' and [umr_rc_cc_sn] = '''''' + replace([umr_rc_cc_sn], '''''''', '''''''''''') + '''''''' as [query]
+	,''select ' + @columnsSelect + ' from [export].[getData_' + @id + '] d where [Reporting_Period_End_Date] = '''''' + convert(varchar(10),[Reporting_Period_End_Date]) + '''''' and coalesce([' + @group_by_selection + '],'''''''') = '''''' + [Group_By_Selection_Folder] + '''''' and [umr_rc_cc_sn] = '''''' + replace([umr_rc_cc_sn], '''''''', '''''''''''') + '''''''' as [query]
 into [export].[getData_' + @id + '_grouped]
 from (
 	select distinct
