@@ -539,7 +539,7 @@ set @sql = 'select
 	,coalesce(nullif([Group_By_Selection_Folder],''None''),'''') as [Group_By_Selection_Folder]
 	,[umr_rc_cc_sn_File]
 	,[RowsNumber]
-	,''select ' + @columns + ' from [export].[getData_' + @id + '] d where [Reporting_Period_End_Date] = '''''' + convert(varchar(10),[Reporting_Period_End_Date]) + '''''' and coalesce([' + @group_by_selection + '],'''''''') = '''''' + [Group_By_Selection_Folder] + '''''' and [umr_rc_cc_sn] = '''''' + [umr_rc_cc_sn] + '''''''' as [query]
+	,''select ' + @columns + ' from [export].[getData_' + @id + '] d where [Reporting_Period_End_Date] = '''''' + convert(varchar(10),[Reporting_Period_End_Date]) + '''''' and coalesce([' + @group_by_selection + '],'''''''') = '''''' + [Group_By_Selection_Folder] + '''''' and [umr_rc_cc_sn] = '''''' + replace([umr_rc_cc_sn], '''''''', '''''''''''') + '''''''' as [query]
 into [export].[getData_' + @id + '_grouped]
 from (
 	select distinct
