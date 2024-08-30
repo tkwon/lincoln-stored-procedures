@@ -94,7 +94,14 @@ if (select count(*) from #parametersDateRange) > 0
 		set @startDate = (select [date] from #dateRange where [rowN] = 1)
 		set @endDate = (select [date] from #dateRange where [rowN] = 2)
 
-		set @reportingPeriodWhereClause = ' and [Reporting_Period_End_Date] between ''' + @startDate + ''' and ''' + @endDate + ''''
+		if (select [name] from #parametersDateRange) = 'modified_on'
+			begin
+				set @reportingPeriodWhereClause = ' and cast(d.[modified_on] as date) between ''' + @startDate + ''' and ''' + @endDate + ''''
+			end
+		else
+			begin
+				set @reportingPeriodWhereClause = ' and [Reporting_Period_End_Date] between ''' + @startDate + ''' and ''' + @endDate + ''''
+			end
 
 	end
 else
@@ -496,7 +503,7 @@ set @sql = 'select
 			+ @flagsWhereClause
 			+ @reportingPeriodWhereClause 
 			+ @tpaWhereClause
-			+ @coverholderWhereClause
+			--+ @coverholderWhereClause
 			+ @underwriterWhereClause
 
 exec(@sql)
