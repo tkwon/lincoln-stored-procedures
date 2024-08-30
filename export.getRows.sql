@@ -558,21 +558,22 @@ exec(@createindexsql)
 
 ---- 6) Grouping data ----
 
-set @sql = 'drop table if exists [export].[getData_' + @id + '_grouped]'
-exec(@sql)
-
+drop table if exists ##groupedExport
 
 --declare @group_by_selection_folder varchar(25) =  case when @group_by_selection = 'Coverholder_Name' then 'Coverholder' else @group_by_selection end
 --declare @coverholder_prefix varchar(5) = case when @group_by_selection = 'Coverholder_Name' then 'cg.' else '' end
 --set @group_by_selection = case when @group_by_selection = 'Coverholder_Name' then 'Coverholder_final' else @group_by_selection end
 
 set @sql = 'select
-	[Reporting_Period_End_Date_Folder]
+	[Reporting_Period_End_Date]
+	,[umr_rc_cc_sn]
+	,[Coverholder]
+	,[Reporting_Period_End_Date_Folder]
 	,coalesce(nullif([Group_By_Selection_Folder],''None''),'''') as [Group_By_Selection_Folder]
 	,[umr_rc_cc_sn_File]
 	,[RowsNumber]
 	,''select ' + @columnsSelect + ' from [export].[getData_' + @id + '] d where [Reporting_Period_End_Date] = '''''' + convert(varchar(10),[Reporting_Period_End_Date]) + '''''' and coalesce([' + @group_by_selection + '],'''''''') = '''''' + [Group_By_Selection_Folder] + '''''' and [umr_rc_cc_sn] = '''''' + replace([umr_rc_cc_sn], '''''''', '''''''''''') + '''''''' as [query]
-into [export].[getData_' + @id + '_grouped]
+into ##groupedExport
 from (
 	select distinct
 		''RptDate-'' + convert(varchar(10), [Reporting_Period_End_Date], 32) as [Reporting_Period_End_Date_Folder]
@@ -581,12 +582,39 @@ from (
 		,count(*) as [RowsNumber]
 		,e.[umr_rc_cc_sn]
 		,[Reporting_Period_End_Date]
+		,[Coverholder]
 	from [export].[getData_' + @id + '] e
 	group by [Reporting_Period_End_Date],[' + @group_by_selection + '] ,e.[umr_rc_cc_sn],[Coverholder]
 ) w
 order by [Reporting_Period_End_Date_Folder],[Group_By_Selection_Folder] ,[umr_rc_cc_sn_File]'
 
+exec(@sql)
 
+
+set @sql = 'drop table if exists [export].[getData_' + @id + '_grouped]'
+exec(@sql)
+
+set @sql = 'select
+	 [rowN] as [FileNumber]
+	,[Reporting_Period_End_Date_Folder]
+	,[Group_By_Selection_Folder]
+	,[umr_rc_cc_sn_File]
+	,' + @columnsSelect + '
+into [export].[getData_' + @id + '_grouped]
+from (
+	select
+		 g.[Reporting_Period_End_Date_Folder] 
+		,g.[Group_By_Selection_Folder]
+		,g.[umr_rc_cc_sn_File]
+		,' + @columnsSelect + '
+		,dense_rank() over(order by g.[umr_rc_cc_sn_File]) as [rowN]
+	from [export].[getData_jakub1] d
+	join ##groupedExport g on g.[Reporting_Period_End_Date] = d.[Reporting_Period_End_Date]
+							and g.[umr_rc_cc_sn] = d.[umr_rc_cc_sn]
+							and g.[Coverholder] = d.[Coverholder]
+							and g.[Group_By_Selection_Folder] = d.[' + @group_by_selection + ']
+) d
+order by [rowN]'
 
 exec(@sql)
 
