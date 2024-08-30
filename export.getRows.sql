@@ -536,13 +536,13 @@ where [rowN] = 1
 
 exec(@sql)
 
-set @sql = 'drop table if exists [export].[getData_' + @id + ']'
+set @sql = 'drop table if exists ##exportGetData'
 exec(@sql)
 
 set @sql = 'select 
 	c.[Coverholder_final] as [Coverholder]
 	,e.*
-	into [export].[getData_' + @id + ']
+	into ##exportGetData
 	from ##tempExport e
 	left join ##coverholderGroup c on c.[umr_rc_sn] = e.[umr_rc_sn]'
 
@@ -550,11 +550,11 @@ exec(@sql)
 
 ---- create index on new table ----
 
-declare @createindexsql nvarchar(max)
+--declare @createindexsql nvarchar(max)
 
-set @createindexsql = 'create nonclustered index ix_nc_exportGetData_' + @id + ' on [export].[getData_' + @id + '] ([Reporting_Period_End_Date], [umr_rc_cc_sn], [' + @group_by_selection + ']) include (' + @columnsIndex + ')'
+--set @createindexsql = 'create nonclustered index ix_nc_exportGetData_' + @id + ' on [export].[getData_' + @id + '] ([Reporting_Period_End_Date], [umr_rc_cc_sn], [' + @group_by_selection + ']) include (' + @columnsIndex + ')'
 
-exec(@createindexsql)
+--exec(@createindexsql)
 
 ---- 6) Grouping data ----
 
@@ -583,7 +583,7 @@ from (
 		,e.[umr_rc_cc_sn]
 		,[Reporting_Period_End_Date]
 		,[Coverholder]
-	from [export].[getData_' + @id + '] e
+	from ##exportGetData e
 	group by [Reporting_Period_End_Date],[' + @group_by_selection + '] ,e.[umr_rc_cc_sn],[Coverholder]
 ) w
 order by [Reporting_Period_End_Date_Folder],[Group_By_Selection_Folder] ,[umr_rc_cc_sn_File]'
@@ -591,7 +591,7 @@ order by [Reporting_Period_End_Date_Folder],[Group_By_Selection_Folder] ,[umr_rc
 exec(@sql)
 
 
-set @sql = 'drop table if exists [export].[getData_' + @id + '_grouped]'
+set @sql = 'drop table if exists [export].[getData_' + @id + ']'
 exec(@sql)
 
 set @sql = 'select
@@ -600,7 +600,7 @@ set @sql = 'select
 	,[Group_By_Selection_Folder]
 	,[umr_rc_cc_sn_File]
 	,' + @columnsSelect + '
-into [export].[getData_' + @id + '_grouped]
+into [export].[getData_' + @id + ']
 from (
 	select
 		 g.[Reporting_Period_End_Date_Folder] 
@@ -608,7 +608,7 @@ from (
 		,g.[umr_rc_cc_sn_File]
 		,' + @columnsSelect + '
 		,dense_rank() over(order by g.[umr_rc_cc_sn_File]) as [rowN]
-	from [export].[getData_jakub1] d
+	from ##exportGetData d
 	join ##groupedExport g on g.[Reporting_Period_End_Date] = d.[Reporting_Period_End_Date]
 							and g.[umr_rc_cc_sn] = d.[umr_rc_cc_sn]
 							and g.[Coverholder] = d.[Coverholder]
