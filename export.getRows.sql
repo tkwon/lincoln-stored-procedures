@@ -576,9 +576,9 @@ set @sql = 'select
 into ##groupedExport
 from (
 	select distinct
-		''RptDate-'' + convert(varchar(10), [Reporting_Period_End_Date], 32) as [Reporting_Period_End_Date_Folder]
+		''RptDate-'' + convert(varchar(10), [Reporting_Period_End_Date], 23) as [Reporting_Period_End_Date_Folder]
 		,coalesce([' + @group_by_selection + '],'''') as [Group_By_Selection_Folder]
-		,[Coverholder] + ''-'' + replace(e.[umr_rc_cc_sn],''_'',''-'') + ''-'' + ''(RptDate-'' + convert(varchar(10), [Reporting_Period_End_Date], 32) + '')'' as [umr_rc_cc_sn_File]
+		,[Coverholder] + ''-'' + replace(e.[umr_rc_cc_sn],''_'',''-'') + ''-'' + ''(RptDate-'' + convert(varchar(10), [Reporting_Period_End_Date], 23) + '')'' as [umr_rc_cc_sn_File]
 		,count(*) as [RowsNumber]
 		,e.[umr_rc_cc_sn]
 		,[Reporting_Period_End_Date]
