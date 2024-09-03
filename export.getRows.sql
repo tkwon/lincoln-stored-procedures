@@ -3,7 +3,7 @@ create or alter procedure [export].[sp_getData]
 	,@parameters nvarchar(max)
 	,@columns nvarchar(max)
 	,@group_by_selection varchar(100)
-	,@id varchar(20)
+	,@id varchar(50)
 	,@group_by varchar(255)
 	,@umr_criteria varchar(20)
 
