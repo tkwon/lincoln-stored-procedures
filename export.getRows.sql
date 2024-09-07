@@ -600,6 +600,7 @@ set @sql = 'select
 	,[Group_By_Selection_Folder]
 	,[umr_rc_cc_sn_File]
 	,' + @columnsSelect + '
+	,[BDX_Key]
 into [export].[getData_' + @id + ']
 from (
 	select
@@ -608,6 +609,7 @@ from (
 		,g.[umr_rc_cc_sn_File]
 		,' + @columnsSelect + '
 		,dense_rank() over(order by g.[umr_rc_cc_sn_File]) as [rowN]
+		,d.[umr_rc_cc_sn] as [BDX_Key]
 	from ##exportGetData d
 	join ##groupedExport g on g.[Reporting_Period_End_Date] = d.[Reporting_Period_End_Date]
 							and g.[umr_rc_cc_sn] = d.[umr_rc_cc_sn]
@@ -615,6 +617,7 @@ from (
 							and g.[Group_By_Selection_Folder] = d.[' + @group_by_selection + ']
 ) d
 order by [rowN]'
+
 
 exec(@sql)
 
