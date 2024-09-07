@@ -6,6 +6,7 @@ create or alter procedure [export].[sp_getData]
 	,@id varchar(50)
 	,@group_by varchar(255)
 	,@umr_criteria varchar(20)
+	,@export_by varchar(50)
 
 as
 
@@ -14,6 +15,16 @@ begin
 declare @sql nvarchar(max)
 declare @role varchar(20) = ''
 declare @rlsWhereClause varchar(1000)
+
+declare @export_by_column varchar(20) = case @export_by
+											when 'umr-risk_code-lloyds_cat_code-section_no' then '[umr_rc_cc_sn]'
+											when 'umr-risk_code-lloyds_cat_code' then '[umr_rc_cc]'
+											when 'umr-lloyds_cat_code' then '[umr_cc]'
+											when 'umr-risk_code' then '[umr_rc]'
+											when 'section_no' then '[sn]'
+											when 'lloyds_cat_code' then '[cc]'
+											when 'umr' then '[umr]'
+										end
 
 ---- No grouping case -----
 set @group_by_selection = case 
@@ -491,8 +502,14 @@ drop table if exists ##tempExport
 
 set @sql = 'select 
 				u.[Underwriter], b.[Broker], ''None'' as [None]
-				, d.[Unique_Market_Reference_UMR] + ''_'' + coalesce(nullif(d.[Risk_Code],''''), ''0'') + ''_'' + coalesce(nullif(d.[Lloyds_Cat_Code],''''), ''0'') + ''_'' + coalesce(nullif(d.[Section_No],''''), ''0'') as [umr_rc_cc_sn]
-				, d.[Unique_Market_Reference_UMR] + ''_'' + coalesce(nullif(d.[Risk_Code],''''),''0'')  + ''_'' + coalesce(nullif(d.[Section_No],''''),''0'') as [umr_rc_sn],' 
+				,d.[Unique_Market_Reference_UMR] + ''_'' + coalesce(nullif(d.[Risk_Code],''''), ''0'') + ''_'' + coalesce(nullif(d.[Lloyds_Cat_Code],''''), ''0'') + ''_'' + coalesce(nullif(d.[Section_No],''''), ''0'') as [umr_rc_cc_sn]
+				,d.[Unique_Market_Reference_UMR] + ''_'' + coalesce(nullif(d.[Risk_Code],''''),''0'')  + ''_'' + coalesce(nullif(d.[Section_No],''''),''0'') as [umr_rc_sn]
+				,d.[Unique_Market_Reference_UMR] + ''_'' + coalesce(nullif(d.[Risk_Code],''''),''0'')  + ''_'' + coalesce(nullif(d.[Lloyds_Cat_Code],''''),''0'') as [umr_rc_cc]
+				,d.[Unique_Market_Reference_UMR] + ''_'' + coalesce(nullif(d.[Lloyds_Cat_Code],''''),''0'') as [umr_cc]
+				,d.[Unique_Market_Reference_UMR] + ''_'' + coalesce(nullif(d.[Risk_Code],''''),''0'') as [umr_rc]
+				,coalesce(nullif(d.[Section_No],''''), ''0'') as [sn]
+				,coalesce(nullif(d.[Lloyds_Cat_Code],''''), ''0'') as [cc]
+				,d.[Unique_Market_Reference_UMR] as [umr],' 
 			+ @columnsSelect + '
 			into ##tempExport
 			from [dbo].[rig_datarows] d
@@ -566,27 +583,26 @@ drop table if exists ##groupedExport
 
 set @sql = 'select
 	[Reporting_Period_End_Date]
-	,[umr_rc_cc_sn]
+	,' + @export_by_column + '
 	,[Coverholder]
 	,[Reporting_Period_End_Date_Folder]
 	,coalesce(nullif([Group_By_Selection_Folder],''None''),'''') as [Group_By_Selection_Folder]
-	,[umr_rc_cc_sn_File]
+	,[FileName]
 	,[RowsNumber]
-	,''select ' + @columnsSelect + ' from [export].[getData_' + @id + '] d where [Reporting_Period_End_Date] = '''''' + convert(varchar(10),[Reporting_Period_End_Date]) + '''''' and coalesce([' + @group_by_selection + '],'''''''') = '''''' + [Group_By_Selection_Folder] + '''''' and [umr_rc_cc_sn] = '''''' + replace([umr_rc_cc_sn], '''''''', '''''''''''') + '''''''' as [query]
 into ##groupedExport
 from (
 	select distinct
 		''RptDate-'' + convert(varchar(10), [Reporting_Period_End_Date], 23) as [Reporting_Period_End_Date_Folder]
 		,coalesce([' + @group_by_selection + '],'''') as [Group_By_Selection_Folder]
-		,[Coverholder] + ''-'' + replace(e.[umr_rc_cc_sn],''_'',''-'') + ''-'' + ''(RptDate-'' + convert(varchar(10), [Reporting_Period_End_Date], 23) + '')'' as [umr_rc_cc_sn_File]
+		,[Coverholder] + ''-'' + replace(e.'+ @export_by_column + ',''_'',''-'') + ''-'' + ''(RptDate-'' + convert(varchar(10), [Reporting_Period_End_Date], 23) + '')'' as [FileName]
 		,count(*) as [RowsNumber]
-		,e.[umr_rc_cc_sn]
+		,e.' + @export_by_column + '
 		,[Reporting_Period_End_Date]
 		,[Coverholder]
 	from ##exportGetData e
-	group by [Reporting_Period_End_Date],[' + @group_by_selection + '] ,e.[umr_rc_cc_sn],[Coverholder]
+	group by [Reporting_Period_End_Date],[' + @group_by_selection + '] ,e.' + @export_by_column + ',[Coverholder]
 ) w
-order by [Reporting_Period_End_Date_Folder],[Group_By_Selection_Folder] ,[umr_rc_cc_sn_File]'
+order by [Reporting_Period_End_Date_Folder],[Group_By_Selection_Folder] ,[FileName]'
 
 exec(@sql)
 
@@ -598,7 +614,7 @@ set @sql = 'select
 	 [rowN] as [FileNumber]
 	,[Reporting_Period_End_Date_Folder]
 	,[Group_By_Selection_Folder]
-	,[umr_rc_cc_sn_File]
+	,[FileName]
 	,' + @columnsSelect + '
 	,[BDX_Key]
 into [export].[getData_' + @id + ']
@@ -606,17 +622,18 @@ from (
 	select
 		 g.[Reporting_Period_End_Date_Folder] 
 		,g.[Group_By_Selection_Folder]
-		,g.[umr_rc_cc_sn_File]
+		,g.[FileName]
 		,' + @columnsSelect + '
-		,dense_rank() over(order by g.[umr_rc_cc_sn_File]) as [rowN]
+		,dense_rank() over(order by g.[FileName]) as [rowN]
 		,d.[umr_rc_cc_sn] as [BDX_Key]
 	from ##exportGetData d
 	join ##groupedExport g on g.[Reporting_Period_End_Date] = d.[Reporting_Period_End_Date]
-							and g.[umr_rc_cc_sn] = d.[umr_rc_cc_sn]
+							and g.' + @export_by_column + ' = d.' + @export_by_column + '
 							and g.[Coverholder] = d.[Coverholder]
-							and g.[Group_By_Selection_Folder] = d.[' + @group_by_selection + ']
+							and coalesce(nullif(g.[Group_By_Selection_Folder],''''),''None'') = d.[' + @group_by_selection + ']
 ) d
 order by [rowN]'
+
 
 
 exec(@sql)
