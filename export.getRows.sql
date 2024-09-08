@@ -287,6 +287,17 @@ if @flags = '[]'
 
 ---- Columns -----
 
+drop table if exists #columnsOrder
+
+create table #columnsOrder (
+	[column] varchar(50) null
+	,[rowN] smallint identity(1,1)
+)
+
+insert into #columnsOrder ([column]) 
+values ('Coverholder_Name'), ('TPA_Name'), ('Agreement'), ('Unique_Market_Reference_UMR'), ('Binder_Contract_Inception'), ('Binder_Contract_Expiry'), ('Reporting_Period_End_Date'), ('Class_of_Business'), ('Risk_Code'), ('Section_No'), ('Original_Currency'), ('Settlement_Currency'), ('Rate_of_Exchange'), ('Certificate_Reference'), ('Claim_Reference'), ('Insured_Full_Name'), ('Insured_State'), ('Insured_Country'), ('Location_of_Risk_State'), ('Location_of_Risk_County'), ('Risk_Inception_Date'), ('Risk_Expiry_Date'), ('Period_of_Cover'), ('Loss_State'), ('Location_of_Loss_Country'), ('Cause_of_Loss'), ('Loss_Description'), ('Date_of_Loss_From'), ('Date_of_Loss_To'), ('Date_Claim_Made'), ('Claim_Status'), ('Refer_to_Underwriters'), ('Denial'), ('Litigation_status'), ('Claimant_Name'), ('Loss_County'), ('State_of_Filing'), ('PCS_Code'), ('Medicare_United_States_Bodily_Injury'), ('Medicare_Eligibility_Check_Performed'), ('Medicare_Outcome_of_Eligibility_Status_Check'), ('Medicare_Conditional_Payments'), ('Medicare_MSP_Compliance_Services'), ('Paid_This_Month_Indemnity'), ('Paid_This_Month_Fees'), ('Previously_Paid_Indemnity'), ('Previously_Paid_Fees'), ('Reserve_Indemnity'), ('Reserve_Fees'), ('Change_This_Month_Indemnity'), ('Change_This_Month_Fees'), ('Total_Incurred_Indemnity'), ('Total_Incurred_Fees'), ('Coverholder_PIN'), ('Reporting_Period_Start_Date'), ('Type_of_Insurance'), ('Policy_or_Group_Ref'), ('Insured_Address'), ('Insured_Postcode_Zip_Code_or_similar'), ('Location_of_Risk_Location_ID'), ('Location_of_Risk_Address'), ('Location_of_Risk_Postcode_Zip_Code_or_similar'), ('Deductible_Amount'), ('Deductible_Basis'), ('Sums_Insured_Amount'), ('Location_of_Loss_Address'), ('Location_of_Loss_Postcode_Zip_Code_or_similar'), ('Date_Closed'), ('Lloyds_Cat_Code'), ('Catastrophe_Name'), ('Paid_this_month_Expenses'), ('Paid_this_month_Attorney_Coverage_Fees'), ('Paid_this_month_Adjusters_Fees'), ('Paid_this_month_Defence_Fees'), ('Paid_this_month_TPA_Fees'), ('Paid_this_month_Bank_Charges'), ('Previously_Paid_Expenses'), ('Previously_Paid_Attorney_Coverage_Fees'), ('Previously_Paid_Adjusters_Fees'), ('Previously_Paid_Defence_Fees'), ('Previously_Paid_TPA_Fees'), ('Previously_Paid_Bank_Charges'), ('Reserve_Expenses'), ('Reserve_Attorney_Coverage_Fees'), ('Reserve_Adjusters_Fees'), ('Reserve_Defence_Fees'), ('Reserve_TPA_Fees'), ('Reclosed_Date'), ('Net_Recovery'), ('Total_Incurred'), ('Reg_No_of_Vehicle_etc'), ('Ceded_Reinsurance'), ('Plan'), ('Patient_Name'), ('Treatment_Type'), ('Country_of_Treatment'), ('Date_of_Treatment'), ('Expert_Role'), ('Expert_Firm'), ('Expert_Reference_No'), ('Expert_Address'), ('Expert_State'), ('Expert_Postcode_Zip_Code_or_similar'), ('Expert_Country'), ('Notes'), ('Date_Claim_Opened'), ('Ex_gratia_payment'), ('Claim_First_Notification_Acknowledgement_Date'), ('Date_First_Reserve_Established'), ('Date_Coverage_Confirmed'), ('Diary_date'), ('Peer_review_date'), ('Date_Claim_Amount_Agreed'), ('Date_Claims_Paid'), ('Date_of_Subrogation'), ('Date_Reopened'), ('Date_Claim_Denied'), ('Reason_for_Denial'), ('Date_claim_withdrawn'), ('Amount_Claimed'), ('Severity_of_loss'), ('Other_Disbursements'), ('Initial_Reserve_Value'), ('Date_of_Last_Correspondence_Sent'), ('Date_of_Last_Correspondence_Received'), ('Claims_Examiner'), ('Premises_Number'), ('Building_Number'), ('Class_Code'), ('Subrogation_Recovered_This_Month'), ('Subrogation_Previously_Recovered'), ('Total_Subrogation_Recovered'), ('Salvage_Recovered_This_Month'), ('Salvage_Previously_Recovered'), ('Total_Salvage_Recovered'), ('Deductible_Recovered_This_Month'), ('Deductible_Previously_Recovered'), ('Total_Deductible_Recovered'), ('Gross_Recovery_Received_This_Month'), ('Gross_Recovery_Previously_Received'), ('Gross_Recovery_Total'), ('Recovery_Fees_Paid_This_Month'), ('Recovery_Fees_Paid_Previously_Paid'), ('Recovery_Fees_Total'), ('Driver_Age'), ('Cargo_Hauled'), ('Reefer_Claim'), ('Reefer_Age'), ('Cargo_Total_Insured_Value'), ('Vehicle_Unit_Age'), ('Vehicles_Total_Insured_Value'), ('Towing_Storage_Fees'), ('Trailer_Interchange'), ('Non_Owned_Trailer'), ('MTC_Peril'), ('Fault'), ('Distance'), ('Year_of_Account');
+
+
 drop table if exists #columns
 
 select 
@@ -314,22 +325,33 @@ delete from #columns where [Column] in (
 )
 
 
+drop table if exists #columnsFinal
+
+select 
+	c.[Column]
+	,c.[ColumnFinal]
+	,co.[rowN]
+into #columnsFinal
+from #columns c
+join #columnsOrder co on co.[column] = c.[Column]
+order by co.[rowN]
+
+create clustered index [columnsIX] on #columnsFinal([rowN])
+
 declare @columnsSelect nvarchar(max)
 
-set @columnsSelect = (select string_agg([ColumnFinal],', ') from #columns)
-
+set @columnsSelect = (select string_agg([ColumnFinal],', ') from #columnsFinal)
 
 drop table if exists #columnsIndex
 
 select [Column]
 into #columnsIndex
-from #columns
+from #columnsFinal
 where [Column] <> 'Reporting_Period_End_Date'
 
 declare @columnsIndex nvarchar(max)
 
 set @columnsIndex = (select string_agg([Column],', ') from #columnsIndex)
-
 
 
 ---- 1) find the matching Group to the value -----
