@@ -24,7 +24,20 @@ declare @export_by_column varchar(20) = case @export_by
 											when 'section_no' then '[sn]'
 											when 'lloyds_cat_code' then '[cc]'
 											when 'umr' then '[umr]'
+											when 'tpa' then '[TPA]'
+											when 'coverholder' then '[Coverholder]'
+											when 'underwriter' then '[Underwriter]'
 										end
+
+declare @ifCoverholderFileName varchar(20) = case 
+												when @export_by in ('lloyds_cat_code','section_no','tpa', 'coverholder','underwriter') then ''
+												else '[Coverholder] + ''-'''
+											 end
+
+declare @ifCoverholderColumn varchar(20) = case
+												when @export_by = 'coverholder' then ''
+												else ' ,[Coverholder]'
+											end
 
 ---- No grouping case -----
 set @group_by_selection = case 
@@ -523,7 +536,9 @@ where [rowN] = 1
 drop table if exists ##tempExport
 
 set @sql = 'select 
-				u.[Underwriter], b.[Broker], ''None'' as [None]
+				u.[Underwriter]
+				,b.[Broker]
+				,''None'' as [None]
 				,d.[Unique_Market_Reference_UMR] + ''_'' + coalesce(nullif(d.[Risk_Code],''''), ''0'') + ''_'' + coalesce(nullif(d.[Lloyds_Cat_Code],''''), ''0'') + ''_'' + coalesce(nullif(d.[Section_No],''''), ''0'') as [umr_rc_cc_sn]
 				,d.[Unique_Market_Reference_UMR] + ''_'' + coalesce(nullif(d.[Risk_Code],''''),''0'')  + ''_'' + coalesce(nullif(d.[Section_No],''''),''0'') as [umr_rc_sn]
 				,d.[Unique_Market_Reference_UMR] + ''_'' + coalesce(nullif(d.[Risk_Code],''''),''0'')  + ''_'' + coalesce(nullif(d.[Lloyds_Cat_Code],''''),''0'') as [umr_rc_cc]
@@ -550,7 +565,7 @@ exec(@sql)
 
 drop table if exists ##coverholderGroup
 
-set @sql = 'select
+select
 	[umr_rc_sn]
 	,[Coverholder_final]
 into ##coverholderGroup
@@ -561,8 +576,8 @@ from (
 		,crls.[coverholder]
 		,crls.[parent_id]
 		,case 
-			when crls.[parent_id] is null then coalesce(crls.[coverholder],''Missing'')
-			else coalesce(ccrls.[coverholder],''Missing'')
+			when crls.[parent_id] is null then coalesce(crls.[coverholder],'Missing')
+			else coalesce(ccrls.[coverholder],'Missing')
 		end as [Coverholder_final]
 		,row_number() over(partition by e.[umr_rc_sn] order by crls.[parent_id]) as [rowN]
 	from ##tempExport e
@@ -571,21 +586,43 @@ from (
 	left join [dbo].[rls_filterset_rls_coverholder] ccrls on ccrls.[id] = crls.[parent_id]
 ) w
 where [rowN] = 1
-'
 
-exec(@sql)
 
-set @sql = 'drop table if exists ##exportGetData'
-exec(@sql)
+drop table if exists ##tpaGroup
 
-set @sql = 'select 
+select
+	[umr_rc_sn]
+	,[TPA_final]
+into ##tpaGroup
+from (
+	select 
+		e.[umr_rc_sn]
+		,c.[RLS_TPA_id]
+		,crls.[TPA]
+		,crls.[parent_id]
+		,case 
+			when crls.[parent_id] is null then coalesce(crls.[TPA],'Missing')
+			else coalesce(ccrls.[TPA],'Missing')
+		end as [TPA_final]
+		,row_number() over(partition by e.[umr_rc_sn] order by crls.[parent_id]) as [rowN]
+	from ##tempExport e
+	join [dbo].[rls_filterset_umr_tpa] c on c.[UMR_Risk_Section] = e.[umr_rc_sn]
+	join [dbo].[rls_filterset_rls_tpa] crls on crls.[id] = c.[RLS_TPA_id]
+	left join [dbo].[rls_filterset_rls_tpa] ccrls on ccrls.[id] = crls.[parent_id]
+) w
+where [rowN] = 1
+
+
+drop table if exists ##exportGetData
+
+select 
 	c.[Coverholder_final] as [Coverholder]
+	,t.[TPA_final] as [TPA]
 	,e.*
 	into ##exportGetData
 	from ##tempExport e
-	left join ##coverholderGroup c on c.[umr_rc_sn] = e.[umr_rc_sn]'
-
-exec(@sql)
+	left join ##coverholderGroup c on c.[umr_rc_sn] = e.[umr_rc_sn]
+	left join ##tpaGroup t on t.[umr_rc_sn] = e.[umr_rc_sn]
 
 ---- create index on new table ----
 
@@ -605,8 +642,8 @@ drop table if exists ##groupedExport
 
 set @sql = 'select
 	[Reporting_Period_End_Date]
-	,' + @export_by_column + '
-	,[Coverholder]
+	,' + @export_by_column 
+	 + @ifCoverholderColumn + ' 
 	,[Reporting_Period_End_Date_Folder]
 	,coalesce(nullif([Group_By_Selection_Folder],''None''),'''') as [Group_By_Selection_Folder]
 	,[FileName]
@@ -616,11 +653,11 @@ from (
 	select distinct
 		''RptDate-'' + convert(varchar(10), [Reporting_Period_End_Date], 23) as [Reporting_Period_End_Date_Folder]
 		,coalesce([' + @group_by_selection + '],'''') as [Group_By_Selection_Folder]
-		,[Coverholder] + ''-'' + replace(e.'+ @export_by_column + ',''_'',''-'') + ''-'' + ''(RptDate-'' + convert(varchar(10), [Reporting_Period_End_Date], 23) + '')'' as [FileName]
+		,'+ @ifCoverholderFileName + '+ replace(coalesce(e.'+ @export_by_column + ',''0''),''_'',''-'') + ''-'' + ''(RptDate-'' + convert(varchar(10), [Reporting_Period_End_Date], 23) + '')'' as [FileName]
 		,count(*) as [RowsNumber]
 		,e.' + @export_by_column + '
 		,[Reporting_Period_End_Date]
-		,[Coverholder]
+		' + @ifCoverholderColumn + '
 	from ##exportGetData e
 	group by [Reporting_Period_End_Date],[' + @group_by_selection + '] ,e.' + @export_by_column + ',[Coverholder]
 ) w
@@ -650,16 +687,13 @@ from (
 		,d.[umr_rc_cc_sn] as [BDX_Key]
 	from ##exportGetData d
 	join ##groupedExport g on g.[Reporting_Period_End_Date] = d.[Reporting_Period_End_Date]
-							and g.' + @export_by_column + ' = d.' + @export_by_column + '
+							and coalesce(g.' + @export_by_column + ',''None'') = coalesce(d.' + @export_by_column + ',''None'')
 							and g.[Coverholder] = d.[Coverholder]
-							and coalesce(nullif(g.[Group_By_Selection_Folder],''''),''None'') = d.[' + @group_by_selection + ']
+							and coalesce(nullif(g.[Group_By_Selection_Folder],''''),''None'') = coalesce(d.[' + @group_by_selection + '],''None'')
 ) d
 order by [rowN]'
 
-
-
 exec(@sql)
-
 
 end
 
