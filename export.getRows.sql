@@ -367,6 +367,30 @@ declare @columnsIndex nvarchar(max)
 set @columnsIndex = (select string_agg([Column],', ') from #columnsIndex)
 
 
+drop table if exists #columnsSum
+
+select
+	[COLUMN_NAME] as [Column]
+	,'sum([' + [COLUMN_NAME] + ']) as [' + [COLUMN_NAME] + '_current_month_sum]' as [ColumnSum]
+into #columnsSum
+from (
+	select 
+	    i.[COLUMN_NAME],
+	    i.[DATA_TYPE]
+	from 
+	    INFORMATION_SCHEMA.COLUMNS i
+	join #columnsFinal c on c.[Column] = i.[COLUMN_NAME] 
+	where 
+	    [TABLE_NAME] = 'rig_datarows'
+	    and [TABLE_SCHEMA] = 'dbo'
+) w
+where [DATA_TYPE] = 'numeric'
+
+declare @columnsSum nvarchar(max) 
+
+set @columnsSum = (select string_agg(cast([ColumnSum] as nvarchar(max)), ', ') from #columnsSum)
+
+
 ---- 1) find the matching Group to the value -----
 
 if @role <> ''
@@ -624,6 +648,35 @@ select
 	left join ##coverholderGroup c on c.[umr_rc_sn] = e.[umr_rc_sn]
 	left join ##tpaGroup t on t.[umr_rc_sn] = e.[umr_rc_sn]
 
+
+-----  Transactions ------
+
+declare @currentMonth date = (select max([Reporting_Period_End_Date]) from ##exportGetData)
+declare @previousMonth date = (select eomonth(dateadd(month, -1, max([Reporting_Period_End_Date]))) from ##exportGetData)
+
+drop table if exists #currentMonthSum
+
+select 
+	e.[umr_rc_cc_sn] as [BDX_Key]
+	,t.[reporting_period_end_date]
+	,sum(t.[amount]) as [Amount]
+into #currentMonthSum
+from ##exportGetData e
+join [dbo].[billing_transaction] t on t.[bdx_key] = e.[umr_rc_cc_sn] and t.[reporting_period_end_date] = @currentMonth
+group by e.[umr_rc_cc_sn],t.[reporting_period_end_date]
+
+drop table if exists #previousMonthSum
+
+select 
+	e.[umr_rc_cc_sn] as [BDX_Key]
+	,t.[reporting_period_end_date]
+	,sum(t.[amount]) as [Amount]
+into #previousMonthSum
+from ##exportGetData e
+join [dbo].[billing_transaction] t on t.[bdx_key] = e.[umr_rc_cc_sn] and t.[reporting_period_end_date] = @previousMonth
+group by e.[umr_rc_cc_sn],t.[reporting_period_end_date]
+
+
 ---- create index on new table ----
 
 --declare @createindexsql nvarchar(max)
@@ -676,6 +729,8 @@ set @sql = 'select
 	,[FileName]
 	,' + @columnsSelect + '
 	,[BDX_Key]
+	,[current_month_sum]
+	,[previous_month_sum]
 into [export].[getData_' + @id + ']
 from (
 	select
@@ -685,11 +740,15 @@ from (
 		,' + @columnsSelect + '
 		,dense_rank() over(order by g.[FileName]) as [rowN]
 		,d.[umr_rc_cc_sn] as [BDX_Key]
+		,cm.[Amount] as [current_month_sum]
+		,pm.[Amount] as [previous_month_sum]
 	from ##exportGetData d
 	join ##groupedExport g on g.[Reporting_Period_End_Date] = d.[Reporting_Period_End_Date]
 							and coalesce(g.' + @export_by_column + ',''None'') = coalesce(d.' + @export_by_column + ',''None'')
 							and g.[Coverholder] = d.[Coverholder]
 							and coalesce(nullif(g.[Group_By_Selection_Folder],''''),''None'') = coalesce(d.[' + @group_by_selection + '],''None'')
+	left join #currentMonthSum cm on cm.[BDX_Key] = d.[umr_rc_cc_sn] and d.[Reporting_Period_End_Date] = cm.[reporting_period_end_date]
+	left join #previousMonthSum pm on pm.[BDX_Key] = d.[umr_rc_cc_sn] and d.[Reporting_Period_End_Date] = pm.[reporting_period_end_date]
 ) d
 order by [rowN]'
 
