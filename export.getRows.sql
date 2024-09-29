@@ -16,26 +16,30 @@ declare @sql nvarchar(max)
 declare @role varchar(20) = ''
 declare @rlsWhereClause varchar(1000)
 
-declare @export_by_column varchar(20) = case @export_by
-											when 'umr-risk_code-lloyds_cat_code-section_no' then '[umr_rc_cc_sn]'
-											when 'umr-risk_code-lloyds_cat_code' then '[umr_rc_cc]'
-											when 'umr-lloyds_cat_code' then '[umr_cc]'
-											when 'umr-risk_code' then '[umr_rc]'
-											when 'section_no' then '[sn]'
-											when 'lloyds_cat_code' then '[cc]'
-											when 'umr' then '[umr]'
-											when 'tpa' then '[TPA]'
-											when 'coverholder' then '[Coverholder]'
-											when 'underwriter' then '[Underwriter]'
+declare @export_by_column varchar(20) = case 
+											when @export_by = 'umr-risk_code-lloyds_cat_code-section_no' then '[umr_rc_cc_sn]'
+											when @export_by = 'umr-risk_code-lloyds_cat_code' then '[umr_rc_cc]'
+											when @export_by = 'umr-lloyds_cat_code' then '[umr_cc]'
+											when @export_by = 'umr-risk_code' then '[umr_rc]'
+											when @export_by = 'section_no' then '[sn]'
+											when @export_by = 'lloyds_cat_code' then '[cc]'
+											when @export_by = 'umr' then '[umr]'
+											when @export_by = 'tpa' then '[TPA]'
+											when @export_by = 'coverholder' then '[Coverholder]'
+											when @export_by = 'underwriter' then '[Underwriter]'
+											when @export_by = '' and @group_by_selection = '' then '[Combined]'
+											when @export_by = '' and @group_by_selection = 'Coverholder' then '[Coverholder]'
+											when @export_by = '' and @group_by_selection = 'Underwriter' then '[Underwriter]'
+											when @export_by = '' and @group_by_selection = 'Broker' then '[Broker]'
 										end
 
 declare @ifCoverholderFileName varchar(20) = case 
-												when @export_by in ('lloyds_cat_code','section_no','tpa', 'coverholder','underwriter') then ''
+												when @export_by in ('lloyds_cat_code','section_no','tpa', 'coverholder','underwriter','') then ''
 												else '[Coverholder] + ''-'''
 											 end
 
 declare @ifCoverholderColumn varchar(20) = case
-												when @export_by = 'coverholder' then ''
+												when @export_by = 'coverholder' or (@export_by = '' and @group_by_selection = 'Coverholder') then ''
 												else ' ,[Coverholder]'
 											end
 
@@ -570,7 +574,8 @@ set @sql = 'select
 				,d.[Unique_Market_Reference_UMR] + ''_'' + coalesce(nullif(d.[Risk_Code],''''),''0'') as [umr_rc]
 				,coalesce(nullif(d.[Section_No],''''), ''0'') as [sn]
 				,coalesce(nullif(d.[Lloyds_Cat_Code],''''), ''0'') as [cc]
-				,d.[Unique_Market_Reference_UMR] as [umr],' 
+				,d.[Unique_Market_Reference_UMR] as [umr]
+				,'''' as [Combined],' 
 			+ @columnsSelect + '
 			into ##tempExport
 			from [dbo].[rig_datarows] d
@@ -693,6 +698,9 @@ drop table if exists ##groupedExport
 --declare @coverholder_prefix varchar(5) = case when @group_by_selection = 'Coverholder_Name' then 'cg.' else '' end
 --set @group_by_selection = case when @group_by_selection = 'Coverholder_Name' then 'Coverholder_final' else @group_by_selection end
 
+declare @ifExportCombined1 varchar(10) = case when @export_by_column = '[Combined]' then 'RptDate-' else '-(RptDate-' end
+declare @ifExportCombined2 varchar(5) = case when @export_by_column = '[Combined]' then '' else ')' end
+
 set @sql = 'select
 	[Reporting_Period_End_Date]
 	,' + @export_by_column 
@@ -706,7 +714,7 @@ from (
 	select distinct
 		''RptDate-'' + convert(varchar(10), [Reporting_Period_End_Date], 23) as [Reporting_Period_End_Date_Folder]
 		,coalesce([' + @group_by_selection + '],'''') as [Group_By_Selection_Folder]
-		,'+ @ifCoverholderFileName + '+ replace(coalesce(e.'+ @export_by_column + ',''0''),''_'',''-'') + ''-'' + ''(RptDate-'' + convert(varchar(10), [Reporting_Period_End_Date], 23) + '')'' as [FileName]
+		,'+ @ifCoverholderFileName + '+ replace(coalesce(e.'+ @export_by_column + ',''0''),''_'',''-'') +''' + @ifExportCombined1 + ''' + convert(varchar(10), [Reporting_Period_End_Date], 23) + ''' + @ifExportCombined2 + '''as [FileName]
 		,count(*) as [RowsNumber]
 		,e.' + @export_by_column + '
 		,[Reporting_Period_End_Date]
