@@ -302,6 +302,15 @@ set @flagsWhereClause = @flagsWhereClause + ')'
 if @flags = '[]'
 	set @flagsWhereClause = ' where 1=1'
 
+if (select [value] from #flags where [name] = 'Non_Critical_Flag') = 0 and (select [value] from #flags where [name] = 'Critical_Error_Flag') = 0
+	set @flagsWhereClause = ' where uf.[Flag] = ''No Flag'''
+
+if (select [value] from #flags where [name] = 'Non_Critical_Flag') = 1 and (select [value] from #flags where [name] = 'Critical_Error_Flag') = 0
+	set @flagsWhereClause = ' where uf.[Flag] in (''No Flag'', ''Non_Critical_Flag'')'
+
+if (select [value] from #flags where [name] = 'Non_Critical_Flag') = 0 and (select [value] from #flags where [name] = 'Critical_Error_Flag') = 1
+	set @flagsWhereClause = ' where uf.[Flag] in (''No Flag'', ''Critical_Error_Flag'')'
+
 ---- Columns -----
 
 drop table if exists #columnsOrder
@@ -537,6 +546,9 @@ set @sql = 'select ' + @group_by_columns + '
 				from [dbo].[rig_datarows] d
 				join ##activeUmr a on a.[umr_rc_cc_sn] = d.[Unique_Market_Reference_UMR] + ''_'' + coalesce(nullif(d.[Risk_Code],''''), ''0'') + ''_'' + coalesce(nullif(d.[Lloyds_Cat_Code],''''), ''0'') + ''_'' + coalesce(nullif(d.[Section_No],''''), ''0'')
 				join [dbo].[rig_dataintegrityrules] dir on dir.[data_row_id] = d.[id] '
+				+ @tpaWhereClause 
+				+ @coverholderWhereClause
+				--+ @underwriterWhereClause
 				+ @reportingPeriodWhereClause +
 				' ) w'
 
