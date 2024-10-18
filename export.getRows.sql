@@ -1,4 +1,5 @@
 create or alter procedure [export].[sp_getData]
+---- list of parameters
 	@flags varchar(255)
 	,@parameters nvarchar(max)
 	,@columns nvarchar(max)
@@ -11,6 +12,8 @@ create or alter procedure [export].[sp_getData]
 as
 
 begin
+
+---- Declaring variables
 
 declare @sql nvarchar(max)
 declare @role varchar(20) = ''
@@ -56,7 +59,7 @@ drop table if exists #parameters
 
 
 select @parameters as [parametrs] into #parametersJson
-
++
 
 select
      [name]
@@ -276,7 +279,6 @@ declare @i tinyint = 1
 declare @rows tinyint = (select max([rowN]) from #flags)
 declare @flagsWhereClause varchar(255) = 'where uf.[Flag] in ('
 declare @currentName varchar(25) = ''
---declare @currentValue char(1)
 
 while @i <= @rows
 	begin
@@ -285,7 +287,6 @@ while @i <= @rows
 			begin
 				set @currentName = 'Missing'
 			end
-		--set @currentValue = (select [value] from #flags where [rowN] = @i)
 
 		set @flagsWhereClause = @flagsWhereClause + '''' + @currentName + ''''
 
@@ -351,6 +352,8 @@ delete from #columns where [Column] in (
 )
 
 
+-- create table with columns in final order
+
 drop table if exists #columnsFinal
 
 select 
@@ -368,6 +371,8 @@ declare @columnsSelect nvarchar(max)
 
 set @columnsSelect = (select string_agg([ColumnFinal],', ') from #columnsFinal)
 
+-- create table with columns used in the index
+
 drop table if exists #columnsIndex
 
 select [Column]
@@ -379,6 +384,7 @@ declare @columnsIndex nvarchar(max)
 
 set @columnsIndex = (select string_agg([Column],', ') from #columnsIndex)
 
+-- table with columns that can be summed up (not used at the moment)
 
 drop table if exists #columnsSum
 
@@ -440,8 +446,6 @@ if @role = 'Underwriter'
 else set @underwriterWhereClause = ''
 
 
---select * from ##rlsIds
-
 ---- 2) Get UMRs for specified group ----
 drop table if exists ##umr
 
@@ -478,10 +482,6 @@ begin
 
 end
 
-
---select * from ##umr
---select * from #activeUmr
-
 ---- 3) Get active umrs ----
 
 declare @activeWhereClause varchar(50)
@@ -506,8 +506,6 @@ set @sql = 'select distinct
 
 exec(@sql)
 
-
---select * from #underwriters
 
 ---- 4) Get list of underwriters and brokers for grouping ----
 
@@ -548,7 +546,6 @@ set @sql = 'select ' + @group_by_columns + '
 				join [dbo].[rig_dataintegrityrules] dir on dir.[data_row_id] = d.[id] '
 				+ @tpaWhereClause 
 				+ @coverholderWhereClause
-				--+ @underwriterWhereClause
 				+ @reportingPeriodWhereClause +
 				' ) w'
 
@@ -566,10 +563,6 @@ into #umr_flags
 from ##temp
 where [rowN] = 1
 
-
-
---select * from #umr_flags
---select * from #activeUmr
 
 ---- 5) Get rows from datarows table (based on user's columns and flags selection) -----
 
@@ -598,11 +591,12 @@ set @sql = 'select
 			+ @flagsWhereClause
 			+ @reportingPeriodWhereClause 
 			+ @tpaWhereClause
-			--+ @coverholderWhereClause
 			+ @underwriterWhereClause
 
 exec(@sql)
 
+
+-- Get final coverholder name
 
 drop table if exists ##coverholderGroup
 
@@ -629,6 +623,8 @@ from (
 where [rowN] = 1
 
 
+-- Get final TPA name
+
 drop table if exists ##tpaGroup
 
 select
@@ -653,6 +649,8 @@ from (
 ) w
 where [rowN] = 1
 
+
+-- create temporary table (joined ##tempExport with coverholder and TPA name)
 
 drop table if exists ##exportGetData
 
@@ -694,21 +692,9 @@ join [dbo].[billing_transaction] t on t.[bdx_key] = e.[umr_rc_cc_sn] and t.[repo
 group by e.[umr_rc_cc_sn],t.[reporting_period_end_date]
 
 
----- create index on new table ----
-
---declare @createindexsql nvarchar(max)
-
---set @createindexsql = 'create nonclustered index ix_nc_exportGetData_' + @id + ' on [export].[getData_' + @id + '] ([Reporting_Period_End_Date], [umr_rc_cc_sn], [' + @group_by_selection + ']) include (' + @columnsIndex + ')'
-
---exec(@createindexsql)
-
 ---- 6) Grouping data ----
 
 drop table if exists ##groupedExport
-
---declare @group_by_selection_folder varchar(25) =  case when @group_by_selection = 'Coverholder_Name' then 'Coverholder' else @group_by_selection end
---declare @coverholder_prefix varchar(5) = case when @group_by_selection = 'Coverholder_Name' then 'cg.' else '' end
---set @group_by_selection = case when @group_by_selection = 'Coverholder_Name' then 'Coverholder_final' else @group_by_selection end
 
 declare @ifExportCombined1 varchar(10) = case when @export_by_column = '[Combined]' then 'RptDate-' else '-(RptDate-' end
 declare @ifExportCombined2 varchar(5) = case when @export_by_column = '[Combined]' then '' else ')' end
@@ -738,6 +724,8 @@ order by [Reporting_Period_End_Date_Folder],[Group_By_Selection_Folder] ,[FileNa
 
 exec(@sql)
 
+
+---- insert grouped data into final table in export schema
 
 set @sql = 'drop table if exists [export].[getData_' + @id + ']'
 exec(@sql)
