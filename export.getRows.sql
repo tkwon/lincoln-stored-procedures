@@ -59,7 +59,7 @@ drop table if exists #parameters
 
 
 select @parameters as [parametrs] into #parametersJson
-+
+
 
 select
      [name]
