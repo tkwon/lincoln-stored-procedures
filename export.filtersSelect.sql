@@ -225,7 +225,9 @@ drop table if exists ##umrRSFiltered_underwriter
 
 create table ##umrRSFiltered_underwriter (
 	[UMR_Risk_Section] nvarchar(256) null
-)
+)	
+
+declare @paramsUnderwriterWhereClause varchar(100) = ''
 
 if (select count(*) from #params_underwriter) > 0
 begin
@@ -244,6 +246,8 @@ begin
 	) w
 	where [rowN] = 1
 
+	set @paramsUnderwriterWhereClause = 'where t2.[underwriter] in (select [underwriter] from #params_underwriter)'
+
 end
 
 drop table if exists ##umrRSFiltered_coverholder
@@ -251,6 +255,8 @@ drop table if exists ##umrRSFiltered_coverholder
 create table ##umrRSFiltered_coverholder (
 	[UMR_Risk_Section] nvarchar(256) null
 )
+
+declare @paramsCoverholderWhereClause varchar(100) = ''
 
 if (select count(*) from #params_coverholder) > 0
 begin
@@ -269,6 +275,8 @@ begin
 	) w
 	where [rowN] = 1
 
+	set @paramsCoverholderWhereClause = 'where t2.[coverholder] in (select [coverholder] from #params_coverholder)'
+
 end
 
 drop table if exists ##umrRSFiltered_tpa
@@ -276,6 +284,8 @@ drop table if exists ##umrRSFiltered_tpa
 create table ##umrRSFiltered_tpa (
 	[UMR_Risk_Section] nvarchar(256) null
 )
+
+declare @paramsTpaWhereClause varchar(100) = ''
 
 if (select count(*) from #params_tpa) > 0
 begin
@@ -293,6 +303,8 @@ begin
 		where t2.[tpa] in (select [tpa] from #params_tpa)
 	) w
 	where [rowN] = 1
+
+	set @paramsTpaWhereClause = 'where t2.[TPA] in (select [TPA] from #params_tpa)'
 
 end
 
@@ -442,7 +454,8 @@ else
 		from [rls_filterset_umr_tpa] umr
 		join [rls_filterset_rls_tpa] t1 on umr.[RLS_TPA_id] = t1.[id]
 		left join [rls_filterset_rls_tpa] t2 on t1.[parent_id] = t2.[id]
-		join ##datarowsUMR d on d.[UMR_Risk_Section] = umr.[UMR_Risk_Section]
+		join ##datarowsUMR d on d.[UMR_Risk_Section] = umr.[UMR_Risk_Section]'
+		+ @paramsTpaWhereClause + '
 	) w
 	where [rowN] = 1'
 
@@ -470,7 +483,8 @@ else
 		from [rls_filterset_umr_coverholder] umr
 		join [rls_filterset_rls_coverholder] t1 on umr.[RLS_Coverholder_id] = t1.[id]
 		left join [rls_filterset_rls_coverholder] t2 on t1.[parent_id] = t2.[id]
-		join ##datarowsUMR d on d.[UMR_Risk_Section] = umr.[UMR_Risk_Section]
+		join ##datarowsUMR d on d.[UMR_Risk_Section] = umr.[UMR_Risk_Section]'
+		+ @paramsCoverholderWhereClause + '
 	) w
 	where [rowN] = 1'
 
@@ -518,7 +532,8 @@ else
 		from [rls_filterset_umr_underwriter] umr
 		join [rls_filterset_rls_underwriter] t1 on umr.[RLS_Underwriter_id] = t1.[id]
 		left join [rls_filterset_rls_underwriter] t2 on t1.[parent_id] = t2.[id]
-		join ##datarowsUMR d on d.[UMR_Risk_Section] = umr.[UMR_Risk_Section]
+		join ##datarowsUMR d on d.[UMR_Risk_Section] = umr.[UMR_Risk_Section]'
+		+ @paramsUnderwriterWhereClause + '
 	) w
 	where [rowN] = 1'
 
