@@ -473,8 +473,8 @@ end
 if @role = ''
 begin
 
-	set @sql = 'insert ##umr ([umr_rc_sn])
-				select distinct d.[umr_rc_sn]
+	set @sql = 'insert ##umr ([umr_rc_sn],[UMR])
+				select distinct d.[umr_rc_sn], d.[UMR]
 				from [dbo].[rls_filterset_globalumr] d'
 				+ @umrWhereClause
 	
