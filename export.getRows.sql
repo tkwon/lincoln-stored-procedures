@@ -8,6 +8,8 @@ create or alter procedure [export].[sp_getData]
 	,@group_by varchar(255)
 	,@umr_criteria varchar(20)
 	,@export_by varchar(50)
+	,@role varchar(20)
+	,@role_value varchar(255)
 
 as
 
@@ -16,7 +18,7 @@ begin
 ---- Declaring variables
 
 declare @sql nvarchar(max)
-declare @role varchar(20) = ''
+declare @rlsFilterset varchar(20) = ''
 declare @rlsWhereClause varchar(1000)
 
 declare @export_by_column varchar(20) = case 
@@ -158,58 +160,101 @@ else
 
 ---- TPA -----
 
-drop table if exists #tpa
+drop table if exists ##tpa
 
 select 
 	[name]
 	,ltrim(rtrim(replace(replace(replace(replace(s.[value], char(10), char(32)),char(13), char(32)),char(160), char(32)),char(9),char(32)))) as [TPA]
-into #tpa
+into ##tpa
 from #parameters p
 cross apply string_split(trim('[""] ' from replace(p.[value],'"','')), ',') s
 where [name] = 'TPA_Name'
 
+if (select count(*) from ##tpa) = 0 and @role = 'TPA'
+begin
+	set @sql = 'drop table if exists ##tpa'
+	exec(@sql)
 
-if (select count(*) from #tpa) > 0
-	set @role = 'TPA'
-if (select count(*) from #tpa) > 0
-	set @rlsWhereClause = 'select [TPA] from #tpa'
+	set @sql = '
+		select ''' + 
+			@role + ''' as [name]
+			,''' + @role_value + ''' as [TPA]
+		into ##tpa
+	'
+
+	exec(@sql)
+end
+
+if (select count(*) from ##tpa) > 0
+	set @rlsFilterset = 'TPA'
+if (select count(*) from ##tpa) > 0
+	set @rlsWhereClause = 'select [TPA] from ##tpa'
 	
 ---- Underwriter -----
 
-drop table if exists #underwriter
+drop table if exists ##underwriter
 
 select 
 	[name]
 	,ltrim(rtrim(replace(replace(replace(replace(s.[value], char(10), char(32)),char(13), char(32)),char(160), char(32)),char(9),char(32)))) as [Underwriter]
-into #underwriter
+into ##underwriter
 from #parameters p
 cross apply string_split(trim('[""] ' from replace(p.[value],'"','')), ',') s
 where [name] = 'Underwriter_Name'
 
+if (select count(*) from ##underwriter) = 0 and @role = 'Underwriter'
+begin
+	set @sql = 'drop table if exists ##underwriter'
+	exec(@sql)
 
-if (select count(*) from #underwriter) > 0
-	set @role = 'Underwriter'
-if (select count(*) from #underwriter) > 0
-	set @rlsWhereClause = 'select [Underwriter] from #underwriter'
+	set @sql = '
+		select ''' + 
+			@role + ''' as [name]
+			,''' + @role_value + ''' as [Underwriter]
+		into ##underwriter
+	'
+
+	exec(@sql)
+end
+
+
+if (select count(*) from ##underwriter) > 0
+	set @rlsFilterset = 'Underwriter'
+if (select count(*) from ##underwriter) > 0
+	set @rlsWhereClause = 'select [Underwriter] from ##underwriter'
 
 
 ---- Coverholder ----
 
-drop table if exists #coverholder
+drop table if exists ##coverholder
 
 select 
 	[name]
 	,ltrim(rtrim(replace(replace(replace(replace(s.[value], char(10), char(32)),char(13), char(32)),char(160), char(32)),char(9),char(32)))) as [Coverholder]
-into #coverholder
+into ##coverholder
 from #parameters p
 cross apply string_split(trim('[""] ' from replace(p.[value],'"','')), ',') s
 where [name] = 'Coverholder_Name'
 
+if (select count(*) from ##coverholder) = 0 and @role = 'Coverholder'
+begin
+	set @sql = 'drop table if exists ##coverholder'
+	exec(@sql)
 
-if (select count(*) from #coverholder) > 0
-	set @role = 'Coverholder'
-if (select count(*) from #coverholder) > 0
-	set @rlsWhereClause = 'select [Coverholder] from #coverholder'
+	set @sql = '
+		select ''' + 
+			@role + ''' as [name]
+			,''' + @role_value + ''' as [Coverholder]
+		into ##coverholder
+	'
+
+	exec(@sql)
+end
+
+if (select count(*) from ##coverholder) > 0
+	set @rlsFilterset = 'Coverholder'
+if (select count(*) from ##coverholder) > 0
+	set @rlsWhereClause = 'select [Coverholder] from ##coverholder'
 
 
 ---- UMR -----
@@ -412,15 +457,15 @@ set @columnsSum = (select string_agg(cast([ColumnSum] as nvarchar(max)), ', ') f
 
 ---- 1) find the matching Group to the value -----
 
-if @role <> ''
+if @rlsFilterset <> ''
 begin
 
 	drop table if exists ##rlsIds
 	
 	set @sql = 'select * into ##rlsIds
-				from [dbo].[rls_filterset_rls_' + @role + ']
+				from [dbo].[rls_filterset_rls_' + @rlsFilterset + ']
 				where [parent_id] in (
-					select [id] from [dbo].[rls_filterset_rls_' + @role + '] where ' + @role + ' in (' + @rlsWhereClause + ') and [parent_id] is null
+					select [id] from [dbo].[rls_filterset_rls_' + @rlsFilterset + '] where ' + @rlsFilterset + ' in (' + @rlsWhereClause + ') and [parent_id] is null
 		)
 	'
 	exec(@sql)
@@ -429,19 +474,19 @@ end
 	
 declare @tpaWhereClause varchar(255)
 
-if @role = 'TPA'
+if @rlsFilterset = 'TPA'
 	set @tpaWhereClause = ' and [TPA_Name] in (select [TPA] from ##rlsIds)'
 else set @tpaWhereClause = ''
 
 declare @coverholderWhereClause varchar(255)
 
-if @role = 'Coverholder'
+if @rlsFilterset = 'Coverholder'
 	set @coverholderWhereClause = ' and [Coverholder_Name] in (select [Coverholder] from ##rlsIds)'
 else set @coverholderWhereClause = ''
 
 declare @underwriterWhereClause varchar(255)
 
-if @role = 'Underwriter'
+if @rlsFilterset = 'Underwriter'
 	set @underwriterWhereClause = ' and u.[Underwriter] in (select [underwriter] from ##rlsIds)'
 else set @underwriterWhereClause = ''
 
@@ -456,21 +501,21 @@ create table ##umr (
 	,[umr_rc_sn] nvarchar(256) null
 )
 
-if @role <> ''
+if @rlsFilterset <> ''
 begin
 
 	set @sql = 'insert ##umr ([UMR],[Risk_Code],[Section_No],[umr_rc_sn])
 				select distinct d.[UMR], coalesce(nullif(d.[Risk_Code],''''), ''0'') as [Risk_Code], coalesce(nullif(d.[Section_No],''''), ''0'') as [Section_No]
 					,d.[UMR] + ''_'' + coalesce(nullif(d.[Risk_Code],''''), ''0'') + ''_'' + coalesce(nullif(d.[Section_No],''''), ''0'') as [umr_rc_sn]
-				from [dbo].[rls_filterset_umr_' + @role + '] d
-				join ##rlsIds r on r.[id] = d.[RLS_'+ @role + '_id] '
+				from [dbo].[rls_filterset_umr_' + @rlsFilterset + '] d
+				join ##rlsIds r on r.[id] = d.[RLS_'+ @rlsFilterset + '_id] '
 				+ @umrWhereClause
 	
 	exec(@sql)
 
 end
 
-if @role = ''
+if @rlsFilterset = ''
 begin
 
 	set @sql = 'insert ##umr ([umr_rc_sn],[UMR])
