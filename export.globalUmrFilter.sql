@@ -7,6 +7,7 @@ create or alter procedure [export].[sp_GlobalUmrFilter]
 	,@pageSize int
 	,@role varchar(20)
 	,@role_value varchar(255)
+	,@search varchar(50)
 as
 
 begin
@@ -123,6 +124,10 @@ from (
 			and g.[fcp_status] in (' + @v_fcp_status + ') 
 			and d.[ClaimStatusFlag] in (' + @v_claim_status + ') 
 			and d.[ReserveFlag] in (' + @v_reserve + ') 
+			and (g.[umr] like ''%' + @search + '%''
+				or g.[risk_code] like ''%' + @search + '%''
+				or g.[section_no] like ''%' + @search + '%''
+				or g.[cat_code] like ''%' + @search + '%'')
 	) w
 	where [rowN] = 1
 ) ww
