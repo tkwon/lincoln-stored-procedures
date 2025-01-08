@@ -102,9 +102,8 @@ begin
     set @roleUmrJoin = 'join ' + @t_roleUmrFiltered + ' r on r.[UMR_Risk_Section] = d.[UMR_Risk_Section]'
 end
 
-
-declare @t_dataRows varchar(75) = '##dataRows' + @newId
-set @sql = 'drop table if exists ' + @t_dataRows
+declare @t_tempDataRows varchar(75) = '##tempDataRows' + @newId
+set @sql = 'drop table if exists ' + @t_tempDataRows
 
 exec(@sql)
 
@@ -124,11 +123,34 @@ set @sql = 'select distinct
         when [Claim_Status] in (''c'', ''cl'', ''clre'', ''closed'', ''re-closed'', ''withdrawn'', ''denied'') then 0
         else 1
      end as [ClaimStatusFlag]
-into ' + @t_dataRows + '
+into ' + @t_tempDataRows + '
 from [dbo].[rig_datarows] d
 ' + @roleUmrJoin
 
 exec sp_executesql @sql
+
+
+declare @t_dataRows varchar(75) = '##dataRows' + @newId
+set @sql = 'drop table if exists ' + @t_dataRows
+
+exec(@sql)
+
+set @sql = 'select 
+	[UMR_Risk_Cat_Section]
+	,[ReserveFlag]
+	,[ClaimStatusFlag]
+into ' + @t_dataRows + '
+from (
+	select 
+		[UMR_Risk_Cat_Section]
+		,[ReserveFlag]
+		,[ClaimStatusFlag]
+		,row_number() over(partition by [UMR_Risk_Cat_Section] order by [ReserveFlag] desc,[ClaimStatusFlag] desc) as [rowN]
+	from ' + @t_tempDataRows + '
+) w
+where [rowN] = 1'
+
+exec(@sql)
 
 declare @t_tempGlobalUmr varchar(75) = '##tempGlobalUmr' + @newId
 set @sql = 'drop table if exists ' + @t_tempGlobalUmr
