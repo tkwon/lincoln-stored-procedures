@@ -35,14 +35,14 @@ set @v_fcp_status = case @fcp_status
                         when 'All' then '0,1'
                       end
 set @v_reserve = case @reserve
-                    when 'True' then '1'
-                    when 'False' then '0'
-                    when 'All' then '0,1'
+                    when 'True' then ' = ''1'''
+                    when 'False' then ' = ''0'''
+                    when 'All' then ' in (''0'',''1'',''0,1'')'
                  end
 set @v_claim_status = case @claim_status
-                    when 'True' then '1'
-                    when 'False' then '0'
-                    when 'All' then '0,1'
+                    when 'True' then ' = ''1'''
+                    when 'False' then ' = ''0'''
+                    when 'All' then ' in (''0'',''1'',''0,1'')'
                  end
 
 
@@ -129,6 +129,44 @@ from [dbo].[rig_datarows] d
 
 exec sp_executesql @sql
 
+declare @t_reserve varchar(75) = '##reserve' + @newId
+set @sql = 'drop table if exists ' + @t_reserve
+
+exec(@sql)
+
+set @sql = 'select 	
+	[UMR_Risk_Cat_Section]
+	,string_agg([ReserveFlag],'','') within group (order by [ReserveFlag]) as [ReserveFlagFinal]
+into ' + @t_reserve + '
+from (
+	select distinct 
+		[UMR_Risk_Cat_Section]
+		,[ReserveFlag]
+	from ' + @t_tempDataRows + '
+) w
+group by [UMR_Risk_Cat_Section]'
+
+exec(@sql)
+
+declare @t_claim varchar(75) = '##claim' + @newId
+set @sql = 'drop table if exists ' + @t_claim
+
+exec(@sql)
+
+set @sql = 'select 	
+	[UMR_Risk_Cat_Section]
+	,string_agg([ClaimStatusFlag],'','') within group (order by [ClaimStatusFlag]) as [ClaimStatusFlagFinal]
+into ' + @t_claim + '
+from (
+	select distinct 
+		[UMR_Risk_Cat_Section]
+		,[ClaimStatusFlag]
+	from ' + @t_tempDataRows + '
+) w
+group by [UMR_Risk_Cat_Section]'
+
+exec(@sql)
+
 
 declare @t_dataRows varchar(75) = '##dataRows' + @newId
 set @sql = 'drop table if exists ' + @t_dataRows
@@ -136,19 +174,12 @@ set @sql = 'drop table if exists ' + @t_dataRows
 exec(@sql)
 
 set @sql = 'select 
-	[UMR_Risk_Cat_Section]
-	,[ReserveFlag]
-	,[ClaimStatusFlag]
+	 r.[UMR_Risk_Cat_Section]
+	,r.[ReserveFlagFinal] as [ReserveFlag]
+	,c.[ClaimStatusFlagFinal] as [ClaimStatusFlag]
 into ' + @t_dataRows + '
-from (
-	select 
-		[UMR_Risk_Cat_Section]
-		,[ReserveFlag]
-		,[ClaimStatusFlag]
-		,row_number() over(partition by [UMR_Risk_Cat_Section] order by [ReserveFlag] desc,[ClaimStatusFlag] desc) as [rowN]
-	from ' + @t_tempDataRows + '
-) w
-where [rowN] = 1'
+from ' + @t_reserve + ' r
+join ' + @t_claim + ' c on c.[UMR_Risk_Cat_Section] = r.[UMR_Risk_Cat_Section]'
 
 exec(@sql)
 
@@ -199,8 +230,8 @@ set @sql = 'select
         join ' + @t_dataRows + ' d on d.[UMR_Risk_Cat_Section] = g.[umr_rc_cc_sn]
         where g.[bdx_status] in (' + @v_umr_criteria + ') 
             and g.[fcp_status] in (' + @v_fcp_status + ') 
-            and d.[ClaimStatusFlag] in (' + @v_claim_status + ') 
-            and d.[ReserveFlag] in (' + @v_reserve + ') 
+            and d.[ClaimStatusFlag] ' + @v_claim_status + '
+            and d.[ReserveFlag] ' + @v_reserve + '
             and (g.[umr] like ''%' + @search + '%''
                 or g.[risk_code] like ''%' + @search + '%''
                 or g.[section_no] like ''%' + @search + '%''
@@ -209,6 +240,7 @@ set @sql = 'select
     where [rowN] = 1'
 
 exec sp_executesql @sql
+
 
 drop table if exists #finalResult
 
@@ -227,8 +259,8 @@ create table #finalResult (
     ,[billing_status] bit null
     ,[currency_type] nvarchar(50) null
     ,[fcp_start_date] date null
-    ,[reserve_status] bit null
-    ,[claim_status]	bit null
+    ,[reserve_status] varchar(10) null
+    ,[claim_status]	varchar(10)  null
 )
 
 set @sql = '
@@ -248,8 +280,8 @@ select
     ,[billing_status]
     ,[currency_type]
     ,[fcp_start_date]
-    ,[reserve_status]
-    ,[claim_status]
+    ,case when [reserve_status] = ''0,1'' then ''1'' else [reserve_status] end as [reserve_status]
+    ,case when [claim_status] = ''0,1'' then ''1'' else [claim_status] end as [claim_status]
 from ' + @t_tempGlobalUmr + '
 order by ' + @sort + '
 offset ' + @v_pageOffset + ' rows
@@ -263,6 +295,8 @@ create table #count (
 )
 set @sql = 'insert #count ([TotalRecords]) select count(*) from ' + @t_tempGlobalUmr
 exec(@sql)
+
+
 
 select [TotalRecords] from #count
 select * from  #finalResult
