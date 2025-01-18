@@ -35,16 +35,15 @@ set @v_fcp_status = case @fcp_status
                         when 'All' then '0,1'
                       end
 set @v_reserve = case @reserve
-                    when 'True' then ' = ''1'''
+                    when 'True' then ' in (''1'',''0,1'')'
                     when 'False' then ' = ''0'''
                     when 'All' then ' in (''0'',''1'',''0,1'')'
                  end
 set @v_claim_status = case @claim_status
-                    when 'True' then ' = ''1'''
+                    when 'True' then ' in (''1'',''0,1'')'
                     when 'False' then ' = ''0'''
                     when 'All' then ' in (''0'',''1'',''0,1'')'
                  end
-
 
 ---- Role handling -----
 drop table if exists #roleValues 
