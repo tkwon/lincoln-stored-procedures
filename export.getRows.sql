@@ -1,3 +1,4 @@
+
 create or alter procedure [export].[sp_getData]
 ---- list of parameters
 	@flags varchar(255)
@@ -7,7 +8,7 @@ create or alter procedure [export].[sp_getData]
 	,@id varchar(50)
 	,@group_by varchar(255)
 	,@umr_criteria varchar(20)
-	,@export_by varchar(50)
+	,@export_by varchar(100)
 	,@role varchar(20)
 	,@role_value varchar(255)
 
@@ -21,7 +22,8 @@ declare @sql nvarchar(max)
 declare @rlsFilterset varchar(20) = ''
 declare @rlsWhereClause varchar(1000)
 
-declare @export_by_column varchar(20) = case 
+declare @export_by_column varchar(50) = case 
+											when @export_by = 'umr-risk_code-lloyds_cat_code-section_no-settlement_currency-year_of_account' then '[umr_rc_cc_sn_currency_year]'
 											when @export_by = 'umr-risk_code-lloyds_cat_code-section_no' then '[umr_rc_cc_sn]'
 											when @export_by = 'umr-risk_code-lloyds_cat_code' then '[umr_rc_cc]'
 											when @export_by = 'umr-lloyds_cat_code' then '[umr_cc]'
@@ -431,6 +433,25 @@ set @columnsIndex = (select string_agg([Column],', ') from #columnsIndex)
 
 -- table with columns that can be summed up (not used at the moment)
 
+drop table if exists [temp].[columnsSum_newDR]
+
+select
+	[COLUMN_NAME] as [Column]
+	,'sum([' + [COLUMN_NAME] + ']) as [' + [COLUMN_NAME] + '_current_month_sum]' as [ColumnSum]
+into [temp].[columnsSum_newDR]
+from (
+	select 
+	    i.[COLUMN_NAME],
+	    i.[DATA_TYPE]
+	from 
+	    INFORMATION_SCHEMA.COLUMNS i
+	join #columnsFinal c on c.[Column] = i.[COLUMN_NAME] 
+	where 
+	    [TABLE_NAME] = 'Log_rig_datarows_dedupe'
+	    and [TABLE_SCHEMA] = 'dbo'
+) w
+where [DATA_TYPE] = 'numeric'
+
 drop table if exists #columnsSum
 
 select
@@ -445,7 +466,7 @@ from (
 	    INFORMATION_SCHEMA.COLUMNS i
 	join #columnsFinal c on c.[Column] = i.[COLUMN_NAME] 
 	where 
-	    [TABLE_NAME] = 'rig_datarows'
+	    [TABLE_NAME] = 'Log_rig_datarows_dedupe'
 	    and [TABLE_SCHEMA] = 'dbo'
 ) w
 where [DATA_TYPE] = 'numeric'
@@ -586,7 +607,27 @@ set @sql = 'select ' + @group_by_columns + '
 				select distinct ' + @group_by_columns + '
 						,dir.[Critical_Error_Flag]
 						,dir.[Non_Critical_Flag]
-				from [dbo].[rig_datarows] d
+				from [dbo].[Log_rig_datarows_dedupe] d
+				join ##activeUmr a on a.[umr_rc_cc_sn] = d.[Unique_Market_Reference_UMR] + ''_'' + coalesce(nullif(d.[Risk_Code],''''), ''0'') + ''_'' + coalesce(nullif(d.[Lloyds_Cat_Code],''''), ''0'') + ''_'' + coalesce(nullif(d.[Section_No],''''), ''0'')
+				join [dbo].[rig_dataintegrityrules] dir on dir.[data_row_id] = d.[id] '
+				+ @tpaWhereClause 
+				+ @coverholderWhereClause
+				+ @reportingPeriodWhereClause +
+				' ) w'
+
+exec(@sql)
+
+drop table if exists [temp].[temp_newDR]
+set @sql = 'select ' + @group_by_columns + ' 
+				,[Critical_Error_Flag]
+				,[Non_Critical_Flag]
+				,row_number() over(partition by ' + @group_by_columns + ' order by ' + @group_by_columns + ', [Critical_Error_Flag] desc, [Non_Critical_Flag] desc) as [rowN]
+			into [temp].[temp_newDR]
+			from (	
+				select distinct ' + @group_by_columns + '
+						,dir.[Critical_Error_Flag]
+						,dir.[Non_Critical_Flag]
+				from [dbo].[Log_rig_datarows_dedupe] d
 				join ##activeUmr a on a.[umr_rc_cc_sn] = d.[Unique_Market_Reference_UMR] + ''_'' + coalesce(nullif(d.[Risk_Code],''''), ''0'') + ''_'' + coalesce(nullif(d.[Lloyds_Cat_Code],''''), ''0'') + ''_'' + coalesce(nullif(d.[Section_No],''''), ''0'')
 				join [dbo].[rig_dataintegrityrules] dir on dir.[data_row_id] = d.[id] '
 				+ @tpaWhereClause 
@@ -617,6 +658,7 @@ set @sql = 'select
 				u.[Underwriter]
 				,b.[Broker]
 				,''None'' as [None]
+				,d.[Unique_Market_Reference_UMR] + ''_'' + coalesce(nullif(d.[Risk_Code],''''), ''0'') + ''_'' + coalesce(nullif(d.[Lloyds_Cat_Code],''''), ''0'') + ''_'' + coalesce(nullif(d.[Section_No],''''), ''0'')  + ''_'' + coalesce(nullif(d.[Settlement_Currency],''''), ''0'')  + ''_'' + coalesce(nullif(convert(char(4),d.[Year_of_Account]),''''), ''0'') as [umr_rc_cc_sn_currency_year]
 				,d.[Unique_Market_Reference_UMR] + ''_'' + coalesce(nullif(d.[Risk_Code],''''), ''0'') + ''_'' + coalesce(nullif(d.[Lloyds_Cat_Code],''''), ''0'') + ''_'' + coalesce(nullif(d.[Section_No],''''), ''0'') as [umr_rc_cc_sn]
 				,d.[Unique_Market_Reference_UMR] + ''_'' + coalesce(nullif(d.[Risk_Code],''''),''0'')  + ''_'' + coalesce(nullif(d.[Section_No],''''),''0'') as [umr_rc_sn]
 				,d.[Unique_Market_Reference_UMR] + ''_'' + coalesce(nullif(d.[Risk_Code],''''),''0'')  + ''_'' + coalesce(nullif(d.[Lloyds_Cat_Code],''''),''0'') as [umr_rc_cc]
@@ -628,7 +670,37 @@ set @sql = 'select
 				,'''' as [Combined],' 
 			+ @columnsSelect + '
 			into ##tempExport
-			from [dbo].[rig_datarows] d
+			from [dbo].[Log_rig_datarows_dedupe] d
+			join ##activeUmr a on a.[umr_rc_cc_sn] = d.[Unique_Market_Reference_UMR] + ''_'' + coalesce(nullif(d.[Risk_Code],''''), ''0'') + ''_'' + coalesce(nullif(d.[Lloyds_Cat_Code],''''), ''0'') + ''_'' + coalesce(nullif(d.[Section_No],''''), ''0'')'
+			+ @umr_flags_join + '
+			left join #underwriters u on u.[UMR_Risk_Section] = d.[Unique_Market_Reference_UMR] + ''_'' + coalesce(nullif(d.[Risk_Code],''''), ''0'') + ''_'' + coalesce(nullif(d.[Section_No],''''), ''0'')
+			left join #brokers b on b.[UMR] = d.[Unique_Market_Reference_UMR]'
+			+ @flagsWhereClause
+			+ @reportingPeriodWhereClause 
+			+ @tpaWhereClause
+			+ @underwriterWhereClause
+
+exec(@sql)
+
+drop table if exists [temp].[tempExport_newDR]
+
+set @sql = 'select 
+				u.[Underwriter]
+				,b.[Broker]
+				,''None'' as [None]
+				,d.[Unique_Market_Reference_UMR] + ''_'' + coalesce(nullif(d.[Risk_Code],''''), ''0'') + ''_'' + coalesce(nullif(d.[Lloyds_Cat_Code],''''), ''0'') + ''_'' + coalesce(nullif(d.[Section_No],''''), ''0'')  + ''_'' + coalesce(nullif(d.[Settlement_Currency],''''), ''0'')  + ''_'' + coalesce(nullif(convert(char(4),d.[Year_of_Account]),''''), ''0'') as [umr_rc_cc_sn_currency_year]
+				,d.[Unique_Market_Reference_UMR] + ''_'' + coalesce(nullif(d.[Risk_Code],''''), ''0'') + ''_'' + coalesce(nullif(d.[Lloyds_Cat_Code],''''), ''0'') + ''_'' + coalesce(nullif(d.[Section_No],''''), ''0'') as [umr_rc_cc_sn]
+				,d.[Unique_Market_Reference_UMR] + ''_'' + coalesce(nullif(d.[Risk_Code],''''),''0'')  + ''_'' + coalesce(nullif(d.[Section_No],''''),''0'') as [umr_rc_sn]
+				,d.[Unique_Market_Reference_UMR] + ''_'' + coalesce(nullif(d.[Risk_Code],''''),''0'')  + ''_'' + coalesce(nullif(d.[Lloyds_Cat_Code],''''),''0'') as [umr_rc_cc]
+				,d.[Unique_Market_Reference_UMR] + ''_'' + coalesce(nullif(d.[Lloyds_Cat_Code],''''),''0'') as [umr_cc]
+				,d.[Unique_Market_Reference_UMR] + ''_'' + coalesce(nullif(d.[Risk_Code],''''),''0'') as [umr_rc]
+				,coalesce(nullif(d.[Section_No],''''), ''0'') as [sn]
+				,coalesce(nullif(d.[Lloyds_Cat_Code],''''), ''0'') as [cc]
+				,d.[Unique_Market_Reference_UMR] as [umr]
+				,'''' as [Combined],' 
+			+ @columnsSelect + '
+			into [temp].[tempExport_newDR]
+			from [dbo].[Log_rig_datarows_dedupe] d
 			join ##activeUmr a on a.[umr_rc_cc_sn] = d.[Unique_Market_Reference_UMR] + ''_'' + coalesce(nullif(d.[Risk_Code],''''), ''0'') + ''_'' + coalesce(nullif(d.[Lloyds_Cat_Code],''''), ''0'') + ''_'' + coalesce(nullif(d.[Section_No],''''), ''0'')'
 			+ @umr_flags_join + '
 			left join #underwriters u on u.[UMR_Risk_Section] = d.[Unique_Market_Reference_UMR] + ''_'' + coalesce(nullif(d.[Risk_Code],''''), ''0'') + ''_'' + coalesce(nullif(d.[Section_No],''''), ''0'')
