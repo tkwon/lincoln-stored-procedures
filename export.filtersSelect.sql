@@ -68,6 +68,11 @@ begin
 
 end
 
+if @role = 'Underwriter'
+begin
+	set @roleValueWhereClause = ''
+end
+
 ---- Parameters handling ----
 
 drop table if exists #parametersJson
