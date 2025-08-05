@@ -427,7 +427,7 @@ from (
 		,d.[UMR_Risk_Cat_Section]
 		,d.[Reporting_Period_End_Date]
 		,row_number() over(partition by d.[UMR_Risk_Cat_Section],d.[Reporting_Period_End_Date] order by d.[UMR_Risk_Cat_Section],d.[Reporting_Period_End_Date]) as [rowN]
-	from [dbo].[rig_datarows] d
+	from [dbo].[Log_rig_datarows_dedupe] d
 	join ##globalUmrFiltered g on g.[umr_rc_cc_sn] = d.[UMR_Risk_Cat_Section]'
 	+ @umrRSFilteredJoin 
 	+ @reportingPeriodWhereClause + 
@@ -581,4 +581,3 @@ select
 from ##underwriter
 
 end
-
