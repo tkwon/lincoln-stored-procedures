@@ -1,4 +1,3 @@
-
 create or alter procedure [export].[sp_getData]
 ---- list of parameters
 	@flags varchar(255)
@@ -39,6 +38,21 @@ declare @export_by_column varchar(50) = case
 											when @export_by = '' and @group_by_selection = 'Underwriter' then '[Underwriter]'
 											when @export_by = '' and @group_by_selection = 'Broker' then '[Broker]'
 										end
+
+declare @transactions_join varchar(400) = case @export_by
+		when 'umr-risk_code-lloyds_cat_code-section_no' then 't.[umr] + ''_'' + coalesce(nullif(t.[risk_code],''''), ''0'') + ''_'' + coalesce(nullif(t.[cat_code],''''), ''0'') + ''_'' + coalesce(nullif(t.[section_No],''''), ''0'') = e.[umr_rc_cc_sn]'
+		when 'umr-risk_code-lloyds_cat_code-section_no-settlement_currency-year_of_account' then 't.[umr] + ''_'' + coalesce(nullif(t.[risk_code],''''), ''0'') + ''_'' + coalesce(nullif(t.[cat_code],''''), ''0'') + ''_'' + coalesce(nullif(t.[section_No],''''), ''0'')  + ''_'' + coalesce(nullif(t.[currency_type],''''), ''0'')  + ''_'' + coalesce(nullif(convert(char(4),t.[submission_year]),''''), ''0'') = e.[umr_rc_cc_sn_currency_year]'
+		when 'umr-risk_code-lloyds_cat_code' then 't.[umr] + ''_'' + coalesce(nullif(t.[risk_code],''''), ''0'') + ''_'' + coalesce(nullif(t.[cat_code],''''), ''0'') = e.[umr_rc_cc]'
+		when 'umr-risk_code' then 't.[umr] + ''_'' + coalesce(nullif(t.[risk_code],''''), ''0'') = e.[umr_rc]'
+		when 'umr-lloyds_cat_code' then 't.[umr] + ''_'' + coalesce(nullif(t.[cat_code],''''), ''0'') = e.[umr_cc]'
+		when 'section_no' then 'coalesce(nullif(t.[section_no],''''), ''0'') = e.[sn]'
+		when 'lloyds_cat_code' then 'coalesce(nullif(t.[cat_code],''''), ''0'') = e.[cc]'
+		when 'umr' then 't.[umr] = e.[umr]'
+		when 'tpa' then 't.[tpa] = e.[TPA]'
+		when 'coverholder' then 't.[coverholder] = e.[Coverholder]'
+		when 'underwriter' then 't.[underwriter] = e.[Underwriter]'
+end
+
 
 declare @ifCoverholderFileName varchar(20) = case 
 												when @export_by in ('lloyds_cat_code','section_no','tpa', 'coverholder','underwriter','') then ''
@@ -717,27 +731,47 @@ select
 declare @currentMonth date = (select max([Reporting_Period_End_Date]) from ##exportGetData)
 declare @previousMonth date = (select eomonth(dateadd(month, -1, max([Reporting_Period_End_Date]))) from ##exportGetData)
 
-drop table if exists #currentMonthSum
+drop table if exists ##currentMonthSumTemp
 
-select 
-	e.[umr_rc_cc_sn] as [BDX_Key]
+set @sql = 'select 
+	e.' + @export_by_column + ' as [Export_Key]
 	,t.[reporting_period_end_date]
 	,sum(t.[amount]) as [Amount]
-into #currentMonthSum
+into ##currentMonthSumTemp
 from ##exportGetData e
-join [dbo].[billing_transaction] t on t.[bdx_key] = e.[umr_rc_cc_sn] and t.[reporting_period_end_date] = @currentMonth
-group by e.[umr_rc_cc_sn],t.[reporting_period_end_date]
+join [dbo].[billing_transaction] t on ' + @transactions_join + ' and t.[reporting_period_end_date] = ''' + convert(varchar(15),@currentMonth) + '''
+group by e.' + @export_by_column + ',t.[reporting_period_end_date]'
 
-drop table if exists #previousMonthSum
+exec(@sql)
+
+drop table if exists ##currentMonthSum
 
 select 
-	e.[umr_rc_cc_sn] as [BDX_Key]
+	'CurrentMonth' as [JoinKey]
+	,sum([Amount]) as [Amount]
+into ##currentMonthSum
+from ##currentMonthSumTemp
+
+drop table if exists ##previousMonthSumTemp
+
+set @sql = 'select 
+	e.' + @export_by_column + ' as [Export_Key]
 	,t.[reporting_period_end_date]
 	,sum(t.[amount]) as [Amount]
-into #previousMonthSum
+into ##previousMonthSumTemp
 from ##exportGetData e
-join [dbo].[billing_transaction] t on t.[bdx_key] = e.[umr_rc_cc_sn] and t.[reporting_period_end_date] = @previousMonth
-group by e.[umr_rc_cc_sn],t.[reporting_period_end_date]
+join [dbo].[billing_transaction] t on ' + @transactions_join + ' and t.[reporting_period_end_date] = ''' + convert(varchar(15),@previousMonth) + '''
+group by e.' + @export_by_column + ',t.[reporting_period_end_date]'
+
+exec(@sql)
+
+drop table if exists ##previousMonthSum
+
+select 
+	'PreviousMonth' as [JoinKey]
+	,sum([Amount]) as [Amount]
+into ##previousMonthSum
+from ##previousMonthSumTemp
 
 
 ---- 6) Grouping data ----
@@ -803,8 +837,8 @@ from (
 							and coalesce(g.' + @export_by_column + ',''None'') = coalesce(d.' + @export_by_column + ',''None'')
 							and g.[Coverholder] = d.[Coverholder]
 							and coalesce(nullif(g.[Group_By_Selection_Folder],''''),''None'') = coalesce(d.[' + @group_by_selection + '],''None'')
-	left join #currentMonthSum cm on cm.[BDX_Key] = d.[umr_rc_cc_sn] and d.[Reporting_Period_End_Date] = cm.[reporting_period_end_date]
-	left join #previousMonthSum pm on pm.[BDX_Key] = d.[umr_rc_cc_sn] and d.[Reporting_Period_End_Date] = pm.[reporting_period_end_date]
+	left join ##currentMonthSum cm on cm.[JoinKey] = ''CurrentMonth''
+	left join ##previousMonthSum pm on pm.[JoinKey] = ''PreviousMonth''
 ) d
 order by [rowN]'
 
