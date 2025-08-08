@@ -10,6 +10,7 @@ create or alter procedure [export].[sp_getData]
 	,@export_by varchar(100)
 	,@role varchar(20)
 	,@role_value varchar(255)
+	,@uw_option varchar(10) = 'Lead'
 
 as
 
@@ -20,6 +21,9 @@ begin
 declare @sql nvarchar(max)
 declare @rlsFilterset varchar(20) = ''
 declare @rlsWhereClause varchar(1000)
+
+--declare @isLead bit = case
+--						when @uw_option = 'Lead' then 1
 
 declare @export_by_column varchar(50) = case 
 											when @export_by = 'umr-risk_code-lloyds_cat_code-section_no-settlement_currency-year_of_account' then '[umr_rc_cc_sn_currency_year]'
@@ -41,7 +45,7 @@ declare @export_by_column varchar(50) = case
 
 declare @transactions_join varchar(400) = case @export_by
 		when 'umr-risk_code-lloyds_cat_code-section_no' then 't.[umr] + ''_'' + coalesce(nullif(t.[risk_code],''''), ''0'') + ''_'' + coalesce(nullif(t.[cat_code],''''), ''0'') + ''_'' + coalesce(nullif(t.[section_No],''''), ''0'') = e.[umr_rc_cc_sn]'
-		when 'umr-risk_code-lloyds_cat_code-section_no-settlement_currency-year_of_account' then 't.[umr] + ''_'' + coalesce(nullif(t.[risk_code],''''), ''0'') + ''_'' + coalesce(nullif(t.[cat_code],''''), ''0'') + ''_'' + coalesce(nullif(t.[section_No],''''), ''0'')  + ''_'' + coalesce(nullif(t.[currency_type],''''), ''0'')  + ''_'' + coalesce(nullif(convert(char(4),t.[submission_year]),''''), ''0'') = e.[umr_rc_cc_sn_currency_year]'
+		when 'umr-risk_code-lloyds_cat_code-section_no-settlement_currency-year_of_account' then 't.[bdx_key] = e.[umr_rc_cc_sn_currency_year]'
 		when 'umr-risk_code-lloyds_cat_code' then 't.[umr] + ''_'' + coalesce(nullif(t.[risk_code],''''), ''0'') + ''_'' + coalesce(nullif(t.[cat_code],''''), ''0'') = e.[umr_rc_cc]'
 		when 'umr-risk_code' then 't.[umr] + ''_'' + coalesce(nullif(t.[risk_code],''''), ''0'') = e.[umr_rc]'
 		when 'umr-lloyds_cat_code' then 't.[umr] + ''_'' + coalesce(nullif(t.[cat_code],''''), ''0'') = e.[umr_cc]'
@@ -473,6 +477,9 @@ set @columnsSum = (select string_agg(cast([ColumnSum] as nvarchar(max)), ', ') f
 
 ---- 1) find the matching Group to the value -----
 
+
+
+
 if @rlsFilterset <> ''
 begin
 
@@ -517,6 +524,22 @@ create table ##umr (
 	,[umr_rc_sn] nvarchar(256) null
 )
 
+
+
+declare @lead_condition varchar(500) = case
+							when @rlsFilterset = 'Underwriter' and @uw_option = 'Lead' then ' and d.[lead] = 1'
+							when @rlsFilterset = 'Underwriter' and @uw_option = 'Follow' then ' and d.[lead] = 0'
+							when @rlsFilterset = 'TPA' then ' and exists (
+												select 1 
+												from [dbo].[rls_filterset_umr_underwriter] u 
+												where u.[UMR] = d.[UMR] 
+												and coalesce(nullif(u.[Risk_Code],''''), ''0'') = coalesce(nullif(d.[Risk_Code],''''), ''0'')
+												and coalesce(nullif(u.[Section_No],''''), ''0'') = coalesce(nullif(d.[Section_No],''''), ''0'')
+												and u.[lead] = 1)'
+							else ''
+						end
+
+
 if @rlsFilterset <> ''
 begin
 
@@ -525,7 +548,7 @@ begin
 					,d.[UMR] + ''_'' + coalesce(nullif(d.[Risk_Code],''''), ''0'') + ''_'' + coalesce(nullif(d.[Section_No],''''), ''0'') as [umr_rc_sn]
 				from [dbo].[rls_filterset_umr_' + @rlsFilterset + '] d
 				join ##rlsIds r on r.[id] = d.[RLS_'+ @rlsFilterset + '_id] '
-				+ @umrWhereClause
+				+ @umrWhereClause + @lead_condition
 	
 	exec(@sql)
 
@@ -829,7 +852,7 @@ from (
 		,g.[FileName]
 		,' + @columnsSelect + '
 		,dense_rank() over(order by g.[FileName]) as [rowN]
-		,d.[umr_rc_cc_sn] as [BDX_Key]
+		,d.[umr_rc_cc_sn_currency_year] as [BDX_Key]
 		,cm.[Amount] as [current_month_sum]
 		,pm.[Amount] as [previous_month_sum]
 	from ##exportGetData d
