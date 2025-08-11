@@ -107,7 +107,7 @@ set @sql = 'drop table if exists ' + @t_tempDataRows
 exec(@sql)
 
 set @sql = 'select distinct
-    d.[UMR_Risk_Cat_Section]
+    d.[Unique_Market_Reference_UMR] + ''_'' + coalesce(nullif(d.[Risk_Code],''''), ''0'') + ''_'' + coalesce(nullif(d.[Lloyds_Cat_Code],''''), ''0'') + ''_'' + coalesce(nullif(d.[Section_No],''''), ''0'')  + ''_'' + coalesce(nullif(d.[Settlement_Currency],''''), ''0'')  + ''_'' + coalesce(nullif(convert(char(4),d.[Year_of_Account]),''''), ''0'') as [UMR_Risk_Cat_Section]
    ,case
         when [Reserve_Indemnity] = 0
             and [Reserve_Fees] = 0
@@ -123,7 +123,7 @@ set @sql = 'select distinct
         else 1
      end as [ClaimStatusFlag]
 into ' + @t_tempDataRows + '
-from [dbo].[rig_datarows] d
+from [dbo].[Log_rig_datarows_dedupe] d
 ' + @roleUmrJoin
 
 exec sp_executesql @sql
