@@ -3,6 +3,7 @@ create or alter procedure [export].[sp_FiltersSelect]
 	,@role varchar(20)
 	,@role_value varchar(255)
 	,@umr_criteria varchar(20)
+	,@uw_option varchar(10) = 'Lead'
 
 as
 
@@ -19,12 +20,28 @@ select
 into ##roleValues
 from string_split(@role_value, ',')
 
+--select * from ##roleUmrFiltered
+
 declare @roleValueWhereClause varchar(255) = ''
 declare @roleUmrJoin varchar(255) = ''
 
 if @role <> 'admin'
 
 begin
+
+declare @lead_condition varchar(500) = case
+							when @role = 'Underwriter' and @uw_option = 'Lead' then ' and umr.[lead] = 1'
+							when @role = 'Underwriter' and @uw_option = 'Follow' then ' and umr.[lead] = 0'
+							when @role = 'TPA' then ' and exists (
+												select 1 
+												from [dbo].[rls_filterset_umr_underwriter] u 
+												where u.[UMR] = umr.[UMR] 
+												and coalesce(nullif(u.[Risk_Code],''''), ''0'') = coalesce(nullif(umr.[Risk_Code],''''), ''0'')
+												and coalesce(nullif(u.[Section_No],''''), ''0'') = coalesce(nullif(umr.[Section_No],''''), ''0'')
+												and umr.[lead] = 1)'
+							else ''
+						end
+
 
 	drop table if exists ##roleFiltered
 	
@@ -38,7 +55,7 @@ begin
 		from [rls_filterset_umr_' + @role + '] umr
 		join [rls_filterset_rls_' + @role + '] t1 on umr.[RLS_' + @role + '_id] = t1.[id]
 		join [rls_filterset_rls_' + @role + '] t2 on t1.[parent_id] = t2.[id]
-		where t2.[' + @role + '] in (select [value] from ##roleValues)
+		where t2.[' + @role + '] in (select [value] from ##roleValues) 
 	) w
 	where [rowN] = 1'
 	
@@ -58,7 +75,8 @@ begin
 		from [rls_filterset_umr_' + @role + '] umr
 		join [rls_filterset_rls_' + @role + '] t1 on umr.[RLS_' + @role + '_id] = t1.[id]
 		join [rls_filterset_rls_' + @role + '] t2 on t1.[parent_id] = t2.[id]
-		where t2.[' + @role + '] in (select [value] from ##roleValues)
+		where t2.[' + @role + '] in (select [value] from ##roleValues) '
+		+ @lead_condition + '
 	) w
 	where [rowN] = 1'
 	
@@ -412,6 +430,11 @@ if @reportingPeriodWhereClause <> ''
 
 ---- Get data from datarows and filter on specified conditions
 
+
+
+--if @reportingPeriodWhereClause = '' and @roleValueWhereClause = ''
+--	set @lead_condition = replace(replace(@lead_condition, 'and d.[lead]', 'where d.[lead]'), 'and exists', 'where exists')
+
 drop table if exists ##datarowsUMR
 
 set @sql = 'select
@@ -428,13 +451,14 @@ from (
 		,d.[Reporting_Period_End_Date]
 		,row_number() over(partition by d.[UMR_Risk_Cat_Section],d.[Reporting_Period_End_Date] order by d.[UMR_Risk_Cat_Section],d.[Reporting_Period_End_Date]) as [rowN]
 	from [dbo].[Log_rig_datarows_dedupe] d
-	join ##globalUmrFiltered g on g.[umr_rc_cc_sn] = d.[UMR_Risk_Cat_Section]'
+	join ##globalUmrFiltered g on g.[umr_rc_cc_sn] = d.[Unique_Market_Reference_UMR] + ''_'' + coalesce(nullif(d.[Risk_Code],''''), ''0'') + ''_'' + coalesce(nullif(d.[Lloyds_Cat_Code],''''), ''0'') + ''_'' + coalesce(nullif(d.[Section_No],''''), ''0'')   + ''_'' + coalesce(nullif(d.[Settlement_Currency],''''), ''0'')  + ''_'' + coalesce(nullif(convert(char(4),d.[Year_of_Account]),''''), ''0'')'
 	+ @umrRSFilteredJoin 
-	+ @reportingPeriodWhereClause + 
+	+ @reportingPeriodWhereClause +
 	+ @roleValueWhereClause + '
 ) w
 where [rowN] = 1'
 
+print(@sql)
 exec(@sql)
 
 
@@ -579,5 +603,6 @@ select
 	'Underwriter' as [Field]
 	,[Underwriter] as [FieldName]
 from ##underwriter
+
 
 end
