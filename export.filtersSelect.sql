@@ -20,7 +20,7 @@ select
 into ##roleValues
 from string_split(@role_value, ',')
 
---select * from ##roleUmrFiltered
+--select * from ##roleValues
 
 declare @roleValueWhereClause varchar(255) = ''
 declare @roleUmrJoin varchar(255) = ''
@@ -38,7 +38,7 @@ declare @lead_condition varchar(500) = case
 												where u.[UMR] = umr.[UMR] 
 												and coalesce(nullif(u.[Risk_Code],''''), ''0'') = coalesce(nullif(umr.[Risk_Code],''''), ''0'')
 												and coalesce(nullif(u.[Section_No],''''), ''0'') = coalesce(nullif(umr.[Section_No],''''), ''0'')
-												and umr.[lead] = 1)'
+												and u.[lead] = 1)'
 							else ''
 						end
 
