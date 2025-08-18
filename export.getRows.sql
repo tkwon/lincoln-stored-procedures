@@ -55,6 +55,7 @@ declare @transactions_join varchar(400) = case @export_by
 		when 'tpa' then 't.[tpa] = e.[TPA]'
 		when 'coverholder' then 't.[coverholder] = e.[Coverholder]'
 		when 'underwriter' then 't.[underwriter] = e.[Underwriter]'
+		else 't.[bdx_key] = e.[umr_rc_cc_sn_currency_year]'
 end
 
 
