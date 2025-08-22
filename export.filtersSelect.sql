@@ -451,7 +451,7 @@ from (
 		,d.[Reporting_Period_End_Date]
 		,row_number() over(partition by d.[UMR_Risk_Cat_Section],d.[Reporting_Period_End_Date] order by d.[UMR_Risk_Cat_Section],d.[Reporting_Period_End_Date]) as [rowN]
 	from [dbo].[Log_rig_datarows_dedupe] d
-	join ##globalUmrFiltered g on g.[umr_rc_cc_sn] = d.[Unique_Market_Reference_UMR] + ''_'' + coalesce(nullif(d.[Risk_Code],''''), ''0'') + ''_'' + coalesce(nullif(d.[Lloyds_Cat_Code],''''), ''0'') + ''_'' + coalesce(nullif(d.[Section_No],''''), ''0'')   + ''_'' + coalesce(nullif(d.[Settlement_Currency],''''), ''0'')  + ''_'' + coalesce(nullif(convert(char(4),d.[Year_of_Account]),''''), ''0'')'
+	join ##globalUmrFiltered g on g.[umr_rc_cc_sn] = d.[UMR_Risk_Cat_Section]'
 	+ @umrRSFilteredJoin 
 	+ @reportingPeriodWhereClause +
 	+ @roleValueWhereClause + '
