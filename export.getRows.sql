@@ -752,8 +752,8 @@ select
 
 -----  Transactions ------
 
-declare @currentMonth date = (select max([Reporting_Period_End_Date]) from ##exportGetData)
-declare @previousMonth date = (select eomonth(dateadd(month, -1, max([Reporting_Period_End_Date]))) from ##exportGetData)
+declare @currentMonth date = (select coalesce(max([Reporting_Period_End_Date]),'2099-01-01') from ##exportGetData)
+declare @previousMonth date = (select eomonth(dateadd(month, -1, coalesce(max([Reporting_Period_End_Date]),'2099-01-01'))) from ##exportGetData)
 
 drop table if exists ##currentMonthSumTemp
 
