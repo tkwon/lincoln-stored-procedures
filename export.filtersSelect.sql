@@ -453,8 +453,9 @@ from (
 	from [dbo].[Log_rig_datarows_dedupe] d
 	join ##globalUmrFiltered g on g.[umr_rc_cc_sn] = d.[UMR_Risk_Cat_Section]'
 	+ @umrRSFilteredJoin 
-	+ @reportingPeriodWhereClause +
-	+ @roleValueWhereClause + '
+	+ @reportingPeriodWhereClause + 
+	--+ @roleValueWhereClause + '
+'
 ) w
 where [rowN] = 1'
 
