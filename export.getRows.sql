@@ -298,6 +298,11 @@ if (select count(*) from #umr) > 0
 else
 	set @umrWhereClause = ''
 
+if (select count(*) from #umr) > 0
+	set @transactions_join = @transactions_join + ' and t.[umr] = e.[umr]'
+else
+	set @transactions_join = @transactions_join
+
 
 ---- Flags and Group_by ----
 
