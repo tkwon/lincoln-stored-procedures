@@ -49,16 +49,17 @@ declare @transactions_join varchar(400) = case @export_by
 		when 'umr-risk_code-lloyds_cat_code' then 't.[umr] + ''_'' + coalesce(nullif(t.[risk_code],''''), ''0'') + ''_'' + coalesce(nullif(t.[cat_code],''''), ''0'') = e.[umr_rc_cc]'
 		when 'umr-risk_code' then 't.[umr] + ''_'' + coalesce(nullif(t.[risk_code],''''), ''0'') = e.[umr_rc]'
 		when 'umr-lloyds_cat_code' then 't.[umr] + ''_'' + coalesce(nullif(t.[cat_code],''''), ''0'') = e.[umr_cc]'
-		when 'section_no' then 'coalesce(nullif(t.[section_no],''''), ''0'') = e.[sn]'
-		when 'lloyds_cat_code' then 'coalesce(nullif(t.[cat_code],''''), ''0'') = e.[cc]'
+		when 'section_no' then 't.[umr] = e.[umr] and coalesce(nullif(t.[section_no],''''), ''0'') = e.[sn]'
+		when 'lloyds_cat_code' then 't.[umr] = e.[umr] and coalesce(nullif(t.[cat_code],''''), ''0'') = e.[cc]'
 		when 'umr' then 't.[umr] = e.[umr]'
-		when 'tpa' then 't.[tpa] = e.[TPA]'
-		when 'coverholder' then 't.[coverholder] = e.[Coverholder]'
-		when 'underwriter' then 't.[underwriter] = e.[Underwriter]'
+		when 'tpa' then 't.[bdx_key] = e.[umr_rc_cc_sn_currency_year] and t.[tpa] = e.[TPA]'
+		when 'coverholder' then 't.[bdx_key] = e.[umr_rc_cc_sn_currency_year] and t.[coverholder] = e.[Coverholder]'
+		when 'underwriter' then 't.[bdx_key] = e.[umr_rc_cc_sn_currency_year] and t.[underwriter] = e.[Underwriter]'
 		else 't.[bdx_key] = e.[umr_rc_cc_sn_currency_year]'
 end
 
 
+  
 declare @ifCoverholderFileName varchar(20) = case 
 												when @export_by in ('lloyds_cat_code','section_no','tpa', 'coverholder','underwriter','') then ''
 												else '[Coverholder] + ''-'''
@@ -848,8 +849,8 @@ set @sql = 'select
 	,[FileName]
 	,' + @columnsSelect + '
 	,[BDX_Key]
-	,[current_month_sum]
-	,[previous_month_sum]
+	,coalesce([current_month_sum],0) as [current_month_sum]
+	,coalesce([previous_month_sum],0) as [previous_month_sum]
 into [export].[getData_' + @id + ']
 from (
 	select
