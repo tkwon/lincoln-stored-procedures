@@ -330,11 +330,14 @@ select @group_by_columns = string_agg(value, ', ') from openjson(@group_by)
 
 declare @umr_flags_join varchar(1000)
 
-select @umr_flags_join = 'join #umr_flags uf on ' + string_agg(
-    'uf.' + value + ' = d.' + value, 
-    ' and '
-	)
-	from openjson(@group_by)
+select @umr_flags_join =
+    N'join #umr_flags uf on ' +
+    string_agg(
+        N'coalesce(nullif(uf.' + quotename([value]) + N', ''''), ''0'') = ' +
+        N'coalesce(nullif(d.'  + quotename([value]) + N', ''''), ''0'')',
+        N' and '
+    )
+from openjson(@group_by);
 
 if @flags = '[]'
 	set @umr_flags_join = ''
@@ -651,7 +654,7 @@ set @sql = 'select ' + @group_by_columns + '
 						,dir.[Critical_Error_Flag]
 						,dir.[Non_Critical_Flag]
 				from [dbo].[Log_rig_datarows_dedupe] d
-				join ##activeUmr a on a.[umr_rc_cc_sn] = d.[Unique_Market_Reference_UMR] + ''_'' + coalesce(nullif(d.[Risk_Code],''''), ''0'') + ''_'' + coalesce(nullif(d.[Lloyds_Cat_Code],''''), ''0'') + ''_'' + coalesce(nullif(d.[Section_No],''''), ''0'')
+				join ##activeUmr a on a.[umr_rc_cc_sn] = d.[UMR_Risk_Cat_Section]
 				join [dbo].[rig_dataintegrityrules] dir on dir.[data_row_id] = d.[id] '
 				+ @tpaWhereClause 
 				+ @coverholderWhereClause
