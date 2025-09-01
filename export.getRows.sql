@@ -58,6 +58,24 @@ declare @transactions_join varchar(400) = case @export_by
 		else 't.[bdx_key] = e.[umr_rc_cc_sn_currency_year]'
 end
 
+declare @transactions_distinct_columns varchar(100) = case 
+		when @export_by = 'umr-risk_code-lloyds_cat_code-section_no' then '[umr_rc_cc_sn]'
+		when @export_by = 'umr-risk_code-lloyds_cat_code-section_no-settlement_currency-year_of_account' then '[umr_rc_cc_sn_currency_year]'
+		when @export_by = 'umr-risk_code-lloyds_cat_code' then '[umr_rc_cc]'
+		when @export_by = 'umr-risk_code' then '[umr_rc]'
+		when @export_by = 'umr-lloyds_cat_code' then '[umr_cc]'
+		when @export_by = 'section_no' then '[umr], [sn]'
+		when @export_by = 'lloyds_cat_code' then '[umr], [cc]'
+		when @export_by = 'umr' then '[umr]'
+		when @export_by = 'tpa' then '[umr_rc_cc_sn_currency_year], [TPA]'
+		when @export_by = 'coverholder' then '[umr_rc_cc_sn_currency_year], [Coverholder]'
+		when @export_by = 'underwriter' then '[umr_rc_cc_sn_currency_year], [Underwriter]'
+		when @export_by = '' and @group_by_selection = '' then '[umr_rc_cc_sn_currency_year],[Combined]'
+		when @export_by = '' and @group_by_selection = 'Coverholder' then '[umr_rc_cc_sn_currency_year],[Coverholder]'
+		when @export_by = '' and @group_by_selection = 'Underwriter' then '[umr_rc_cc_sn_currency_year],[Underwriter]'
+		when @export_by = '' and @group_by_selection = 'Broker' then '[umr_rc_cc_sn_currency_year],[Broker]'
+		else '[umr_rc_cc_sn_currency_year]'
+end
 
   
 declare @ifCoverholderFileName varchar(20) = case 
@@ -299,10 +317,10 @@ if (select count(*) from #umr) > 0
 else
 	set @umrWhereClause = ''
 
-if (select count(*) from #umr) > 0
-	set @transactions_join = @transactions_join + ' and t.[umr] = e.[umr]'
-else
-	set @transactions_join = @transactions_join
+--if (select count(*) from #umr) > 0
+--	set @transactions_join = @transactions_join + ' and t.[umr] = e.[umr]'
+--else
+--	set @transactions_join = @transactions_join
 
 
 ---- Flags and Group_by ----
@@ -761,47 +779,51 @@ select
 declare @currentMonth date = (select coalesce(max([Reporting_Period_End_Date]),'2099-01-01') from ##exportGetData)
 declare @previousMonth date = (select eomonth(dateadd(month, -1, coalesce(max([Reporting_Period_End_Date]),'2099-01-01'))) from ##exportGetData)
 
-drop table if exists ##currentMonthSumTemp
+declare @CurrentMonthStart date = datefromparts(year(@currentMonth), month(@currentMonth), 1);
+declare @NextMonthStart    date = dateadd(month, 1, @CurrentMonthStart);
 
-set @sql = 'select 
-	e.' + @export_by_column + ' as [Export_Key]
-	,t.[reporting_period_end_date]
-	,sum(t.[amount]) as [Amount]
-into ##currentMonthSumTemp
-from ##exportGetData e
-join [dbo].[billing_transaction] t on ' + @transactions_join + ' and t.[reporting_period_end_date] = ''' + convert(varchar(15),@currentMonth) + '''
-group by e.' + @export_by_column + ',t.[reporting_period_end_date]'
+--select * from ##exportGetData
 
+drop table if exists ##exportGetData_Unique
+
+set @sql = '
+select distinct ' + @transactions_distinct_columns + '
+into ##exportGetData_Unique from ##exportGetData
+'
 exec(@sql)
 
+--select * from ##currentMonthSumTemp
 drop table if exists ##currentMonthSum
 
-select 
-	'CurrentMonth' as [JoinKey]
-	,sum([Amount]) as [Amount]
+set @sql = '
+select e.' + @export_by_column + ' as [Export_Key],
+       sum(t.[amount]) as [Amount]
 into ##currentMonthSum
-from ##currentMonthSumTemp
-
-drop table if exists ##previousMonthSumTemp
-
-set @sql = 'select 
-	e.' + @export_by_column + ' as [Export_Key]
-	,t.[reporting_period_end_date]
-	,sum(t.[amount]) as [Amount]
-into ##previousMonthSumTemp
-from ##exportGetData e
-join [dbo].[billing_transaction] t on ' + @transactions_join + ' and t.[reporting_period_end_date] = ''' + convert(varchar(15),@previousMonth) + '''
-group by e.' + @export_by_column + ',t.[reporting_period_end_date]'
+from ##exportGetData_Unique e
+join [dbo].[billing_transaction] t
+  on ' + @transactions_join + '
+ where t.[reporting_period_end_date] >= ''' + convert(varchar(10), @CurrentMonthStart, 23) + '''
+   and t.[reporting_period_end_date] <  ''' + convert(varchar(10), @NextMonthStart,    23) + '''
+group by e.' + @export_by_column + '';
 
 exec(@sql)
+
+
 
 drop table if exists ##previousMonthSum
 
-select 
-	'PreviousMonth' as [JoinKey]
-	,sum([Amount]) as [Amount]
+set @sql = '
+select e.' + @export_by_column + ' as [Export_Key],
+       sum(t.[amount]) as [Amount]
 into ##previousMonthSum
-from ##previousMonthSumTemp
+from ##exportGetData_Unique e
+join [dbo].[billing_transaction] t
+  on ' + @transactions_join + '
+ where t.[reporting_period_end_date] < ''' + convert(varchar(10), @CurrentMonthStart, 23) + '''
+group by e.' + @export_by_column + ' ';
+
+exec(@sql)
+
 
 
 ---- 6) Grouping data ----
@@ -867,8 +889,8 @@ from (
 							and coalesce(g.' + @export_by_column + ',''None'') = coalesce(d.' + @export_by_column + ',''None'')
 							and g.[Coverholder] = d.[Coverholder]
 							and coalesce(nullif(g.[Group_By_Selection_Folder],''''),''None'') = coalesce(d.[' + @group_by_selection + '],''None'')
-	left join ##currentMonthSum cm on cm.[JoinKey] = ''CurrentMonth''
-	left join ##previousMonthSum pm on pm.[JoinKey] = ''PreviousMonth''
+	left join ##currentMonthSum cm on cm.[Export_Key] = d.' + @export_by_column + ' 
+	left join ##previousMonthSum pm on pm.[Export_Key] = d.' + @export_by_column + ' 
 ) d
 order by [rowN]'
 
