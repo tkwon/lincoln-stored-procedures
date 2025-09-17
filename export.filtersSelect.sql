@@ -459,7 +459,7 @@ from (
 ) w
 where [rowN] = 1'
 
-print(@sql)
+
 exec(@sql)
 
 

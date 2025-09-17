@@ -103,6 +103,11 @@ drop table if exists #parameters
 select @parameters as [parametrs] into #parametersJson
 
 
+create table #parameters (
+	[name] nvarchar(255) null
+	,[value] nvarchar(255) null
+)
+
 select
      [name]
 	 ,[type]
@@ -125,13 +130,12 @@ from (
 		,[value] nvarchar(max)
     ) as ExtractedData
 ) as ParsedData
-where [value] is not null
+where [name] = 'modified_on'
 
+insert #parameters ([name], [value])
 select
     [name]
     , [value]
-     ,row_number() over(order by [name]) as [rowN]
-into #parameters
 from (
     select 
         [name],
@@ -143,7 +147,25 @@ from (
 		,[value] nvarchar(max) as json
     ) as ExtractedData
 ) as ParsedData
-where isjson([value]) = 1
+where [name] <> 'modified_on' and isjson([value]) = 1
+
+insert #parameters ([name], [value])
+select
+     [name]
+    ,[value]
+from (
+    select 
+        [name]
+        ,[value]
+    from #parametersJson
+    cross apply openjson([parametrs])
+    with (
+		[name] varchar(2000)
+		,[value] nvarchar(max)
+    ) as ExtractedData
+) as ParsedData
+where [name] <> 'modified_on' and isjson([value]) <> 1
+
 
 ---- Reporting Period -----
 
