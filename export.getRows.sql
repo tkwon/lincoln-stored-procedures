@@ -19,7 +19,7 @@ begin
 ---- Declaring variables
 
 declare @sql nvarchar(max)
-declare @rlsFilterset varchar(20) = ''
+declare @rlsFilterset varchar(100) = ''
 declare @rlsWhereClause varchar(1000)
 
 --declare @isLead bit = case
@@ -254,6 +254,8 @@ if (select count(*) from ##tpa) > 0
 	
 ---- Underwriter -----
 
+--select * from ##underwriter
+
 drop table if exists ##underwriter
 
 select 
@@ -280,10 +282,14 @@ begin
 end
 
 
-if (select count(*) from ##underwriter) > 0
+if (select count(*) from ##underwriter) > 0 and @rlsFilterset = ''
 	set @rlsFilterset = 'Underwriter'
-if (select count(*) from ##underwriter) > 0
+if (select count(*) from ##underwriter) > 0 and @rlsFilterset <> ''
+	set @rlsFilterset = @rlsFilterset + ',Underwriter'
+if (select count(*) from ##underwriter) > 0 and @rlsWhereClause = ''
 	set @rlsWhereClause = 'select [Underwriter] from ##underwriter'
+if (select count(*) from ##underwriter) > 0 and @rlsWhereClause <> ''
+	set @rlsWhereClause = @rlsWhereClause + ',select [Underwriter] from ##underwriter'
 
 
 ---- Coverholder ----
@@ -313,10 +319,14 @@ begin
 	exec(@sql)
 end
 
-if (select count(*) from ##coverholder) > 0
+if (select count(*) from ##coverholder) > 0 and @rlsFilterset = ''
 	set @rlsFilterset = 'Coverholder'
-if (select count(*) from ##coverholder) > 0
+if (select count(*) from ##coverholder) > 0 and @rlsFilterset <> ''
+	set @rlsFilterset = @rlsFilterset + ',Coverholder'
+if (select count(*) from ##coverholder) > 0  and @rlsWhereClause = ''
 	set @rlsWhereClause = 'select [Coverholder] from ##coverholder'
+if (select count(*) from ##coverholder) > 0  and @rlsWhereClause <> ''
+	set @rlsWhereClause = @rlsWhereClause + ',select [Coverholder] from ##coverholder'
 
 
 ---- UMR -----
@@ -527,41 +537,72 @@ set @columnsSum = (select string_agg(cast([ColumnSum] as nvarchar(max)), ', ') f
 
 ---- 1) find the matching Group to the value -----
 
+drop table if exists ##rlsIds
 
+create table ##rlsIds (
+	[Role] varchar(20) null
+	,[id] int null
+	,[Value] nvarchar(128) null
+)
 
+print '@rlsFilterset = ' + @rlsFilterset
+print @rlsWhereClause
 
 if @rlsFilterset <> ''
 begin
 
-	drop table if exists ##rlsIds
+	declare @roles table ([role] varchar(20));
+	insert into @roles([role])
+	select ltrim(rtrim(value))
+	from string_split(@rlsFilterset, ',');
 	
-	set @sql = 'select * into ##rlsIds
-				from [dbo].[rls_filterset_rls_' + @rlsFilterset + ']
-				where [parent_id] in (
-					select [id] from [dbo].[rls_filterset_rls_' + @rlsFilterset + '] where ' + @rlsFilterset + ' in (' + @rlsWhereClause + ') and [parent_id] is null
-		)
-	'
-	exec(@sql)
+	declare @RlsRole varchar(20);
+	
+	while exists (select 1 from @roles)
+	begin
+	    select top (1) @RlsRole = role from @roles order by role;
+	
+	
+	    set @sql = N'
+	        insert into ##rlsIds([Role],[id],[Value])
+	        select N' + QUOTENAME(@RlsRole,'''') + N', r.[id], [' + @RlsRole + ']
+	        from ' + QUOTENAME('dbo') + N'.' + QUOTENAME('rls_filterset_rls_' + @RlsRole) + N' as r
+	        where r.[parent_id] in
+	        (
+	            select p.[id]
+	            from ' + QUOTENAME('dbo') + N'.' + QUOTENAME('rls_filterset_rls_' + @RlsRole) + N' as p
+	            where p.' + QUOTENAME(@RlsRole) + N' in (
+	                select ' + QUOTENAME(@RlsRole) + N' from ' + QUOTENAME('##' + lower(@RlsRole)) + N'
+	            )
+	              and p.[parent_id] is null
+	        );';
+	
+	    exec sys.sp_executesql @sql;
+	
+	    delete top (1) from @roles where role = @RlsRole;
+	end
 
 end
-	
+
+
 declare @tpaWhereClause varchar(255)
 
-if @rlsFilterset = 'TPA'
-	set @tpaWhereClause = ' and [TPA_Name] in (select [TPA] from ##rlsIds)'
+if @rlsFilterset like '%TPA%'
+	set @tpaWhereClause = ' and [TPA_Name] in (select [Value] from ##rlsIds where [Role] = ''TPA'')'
 else set @tpaWhereClause = ''
 
 declare @coverholderWhereClause varchar(255)
 
-if @rlsFilterset = 'Coverholder'
-	set @coverholderWhereClause = ' and [Coverholder_Name] in (select [Coverholder] from ##rlsIds)'
+if @rlsFilterset like '%Coverholder%'
+	set @coverholderWhereClause = ' and [Coverholder_Name] in (select [Value] from ##rlsIds where [Role] = ''Coverholder'')'
 else set @coverholderWhereClause = ''
 
 declare @underwriterWhereClause varchar(255)
 
-if @rlsFilterset = 'Underwriter'
-	set @underwriterWhereClause = ' and u.[Underwriter] in (select [underwriter] from ##rlsIds)'
+if @rlsFilterset like '%Underwriter%'
+	set @underwriterWhereClause = ' and u.[Underwriter] in (select [Value] from ##rlsIds where [Role] = ''Underwriter'')'
 else set @underwriterWhereClause = ''
+
 
 
 ---- 2) Get UMRs for specified group ----
@@ -576,10 +617,13 @@ create table ##umr (
 
 
 
+
+
+
 declare @lead_condition varchar(500) = case
 							when @rlsFilterset = 'Underwriter' and @uw_option = 'Lead' then ' and d.[lead] = 1'
 							when @rlsFilterset = 'Underwriter' and @uw_option = 'Follow' then ' and d.[lead] = 0'
-							when @rlsFilterset = 'TPA' then ' and exists (
+							when @rlsFilterset like '%TPA%' then ' and exists (
 												select 1 
 												from [dbo].[rls_filterset_umr_underwriter] u 
 												where u.[UMR] = d.[UMR] 
@@ -590,19 +634,42 @@ declare @lead_condition varchar(500) = case
 						end
 
 
-if @rlsFilterset <> ''
+
+if isnull(@rlsFilterset, '') <> ''
 begin
 
-	set @sql = 'insert ##umr ([UMR],[Risk_Code],[Section_No],[umr_rc_sn])
-				select distinct d.[UMR], coalesce(nullif(d.[Risk_Code],''''), ''0'') as [Risk_Code], coalesce(nullif(d.[Section_No],''''), ''0'') as [Section_No]
-					,d.[UMR] + ''_'' + coalesce(nullif(d.[Risk_Code],''''), ''0'') + ''_'' + coalesce(nullif(d.[Section_No],''''), ''0'') as [umr_rc_sn]
-				from [dbo].[rls_filterset_umr_' + @rlsFilterset + '] d
-				join ##rlsIds r on r.[id] = d.[RLS_'+ @rlsFilterset + '_id] '
-				+ @umrWhereClause + @lead_condition
+	declare @roles_umr table ([role] varchar(20));
+	insert into @roles_umr([role])
+	select ltrim(rtrim(value))
+	from string_split(@rlsFilterset, ',');
 	
-	exec(@sql)
+	declare @RlsRole_umr varchar(20);
 
+    while exists (select 1 from @roles_umr)
+    begin
+        select top (1) @RlsRole_umr = role from @roles_umr order by role;
+
+        set @sql = N'
+            insert ##umr ([UMR],[Risk_Code],[Section_No],[umr_rc_sn])
+            select distinct
+                   d.[UMR],
+                   coalesce(nullif(d.[Risk_Code], ''''), ''0'') as [Risk_Code],
+                   coalesce(nullif(d.[Section_No], ''''), ''0'') as [Section_No],
+                   d.[UMR] + ''_'' +
+                   coalesce(nullif(d.[Risk_Code], ''''), ''0'') + ''_'' +
+                   coalesce(nullif(d.[Section_No], ''''), ''0'')          as [umr_rc_sn]
+            from ' + QUOTENAME('dbo') + N'.' + QUOTENAME('rls_filterset_umr_' + @RlsRole_umr) + N' as d
+            join ##rlsIds r
+              on r.[id] = d.' + QUOTENAME('RLS_' + @RlsRole_umr + '_id') + N'
+             and r.[Role] = ' + QUOTENAME(@RlsRole_umr,'''')
+            + N' ' + isnull(@umrWhereClause, N'') + N' ' + isnull(@lead_condition, N'') + N';';
+
+        exec sys.sp_executesql @sql;
+
+        delete top (1) from @roles_umr where role = @RlsRole_umr;
+    end
 end
+
 
 if @rlsFilterset = ''
 begin
@@ -735,9 +802,11 @@ exec(@sql)
 
 drop table if exists ##coverholderGroup
 
-select
-	[umr_rc_sn]
-	,[Coverholder_final]
+select distinct
+	[Coverholder_final]
+	,[Coverholder_Name]
+	,[Coverholder_Key]
+	,[umr_rc_sn]
 into ##coverholderGroup
 from (
 	select 
@@ -750,21 +819,24 @@ from (
 			else coalesce(ccrls.[coverholder],'Missing')
 		end as [Coverholder_final]
 		,row_number() over(partition by e.[umr_rc_sn] order by crls.[parent_id]) as [rowN]
+		,e.[Coverholder_Name] + '_' + e.[umr_rc_sn] as [Coverholder_Key]
+		,e.[Coverholder_Name]
 	from ##tempExport e
-	join [dbo].[rls_filterset_umr_coverholder] c on c.[UMR_Risk_Section] = e.[umr_rc_sn]
+	join [dbo].[rls_filterset_umr_coverholder] c on c.[Coverholder_UMR_Risk_Section] = upper(e.[Coverholder_Name]) + '_' + e.[umr_rc_sn]
 	join [dbo].[rls_filterset_rls_coverholder] crls on crls.[id] = c.[RLS_Coverholder_id]
 	left join [dbo].[rls_filterset_rls_coverholder] ccrls on ccrls.[id] = crls.[parent_id]
 ) w
-where [rowN] = 1
 
 
 -- Get final TPA name
 
 drop table if exists ##tpaGroup
 
-select
+select distinct
 	[umr_rc_sn]
 	,[TPA_final]
+	,[TPA_Key]
+	,[TPA_Name]
 into ##tpaGroup
 from (
 	select 
@@ -777,12 +849,13 @@ from (
 			else coalesce(ccrls.[TPA],'Missing')
 		end as [TPA_final]
 		,row_number() over(partition by e.[umr_rc_sn] order by crls.[parent_id]) as [rowN]
+		,e.[TPA_Name] + '_' + e.[umr_rc_sn] as [TPA_Key]
+		,e.[TPA_Name]
 	from ##tempExport e
-	join [dbo].[rls_filterset_umr_tpa] c on c.[UMR_Risk_Section] = e.[umr_rc_sn]
+	join [dbo].[rls_filterset_umr_tpa] c on c.[TPA_UMR_Risk_Section] = upper(e.[TPA_Name]) + '_' + e.[umr_rc_sn]
 	join [dbo].[rls_filterset_rls_tpa] crls on crls.[id] = c.[RLS_TPA_id]
 	left join [dbo].[rls_filterset_rls_tpa] ccrls on ccrls.[id] = crls.[parent_id]
 ) w
-where [rowN] = 1
 
 
 -- create temporary table (joined ##tempExport with coverholder and TPA name)
@@ -795,8 +868,8 @@ select
 	,e.*
 	into ##exportGetData
 	from ##tempExport e
-	left join ##coverholderGroup c on c.[umr_rc_sn] = e.[umr_rc_sn]
-	left join ##tpaGroup t on t.[umr_rc_sn] = e.[umr_rc_sn]
+	left join ##coverholderGroup c on c.[Coverholder_Key] = e.[Coverholder_Name] + '_' + e.[umr_rc_sn]
+	left join ##tpaGroup t on t.[TPA_Key] = e.[TPA_Name] + '_' + e.[umr_rc_sn]
 
 
 -----  Transactions ------
