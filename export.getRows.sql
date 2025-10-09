@@ -931,7 +931,7 @@ drop table if exists ##groupedExport
 declare @ifExportCombined1 varchar(10) = case when @export_by_column = '[Combined]' then 'RptDate-' else '-(RptDate-' end
 declare @ifExportCombined2 varchar(5) = case when @export_by_column = '[Combined]' then '' else ')' end
 
-set @sql = 'select
+set @sql = 'select distinct
 	[Reporting_Period_End_Date]
 	,' + @export_by_column 
 	 + @ifCoverholderColumn + ' 
@@ -962,7 +962,7 @@ exec(@sql)
 set @sql = 'drop table if exists [export].[getData_' + @id + ']'
 exec(@sql)
 
-set @sql = 'select
+set @sql = 'select distinct
 	 [rowN] as [FileNumber]
 	,[Reporting_Period_End_Date_Folder]
 	,[Group_By_Selection_Folder]
@@ -985,7 +985,7 @@ from (
 	from ##exportGetData d
 	join ##groupedExport g on g.[Reporting_Period_End_Date] = d.[Reporting_Period_End_Date]
 							and coalesce(g.' + @export_by_column + ',''None'') = coalesce(d.' + @export_by_column + ',''None'')
-							and g.[Coverholder] = d.[Coverholder]
+							and coalesce(g.[Coverholder],''None'') = coalesce(d.[Coverholder],''None'')
 							and coalesce(nullif(g.[Group_By_Selection_Folder],''''),''None'') = coalesce(d.[' + @group_by_selection + '],''None'')
 	left join ##currentMonthSum cm on cm.[Export_Key] = d.' + @export_by_column + ' 
 	left join ##previousMonthSum pm on pm.[Export_Key] = d.' + @export_by_column + ' 
